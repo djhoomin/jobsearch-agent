@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS job (
     cv_html_path    TEXT,
     cv_pdf_path     TEXT,
     ats_json        TEXT,
+    claims_json     TEXT,
     warm_path       TEXT,
     next_action     TEXT,
     due             TEXT,
@@ -133,6 +134,7 @@ class Tracker:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA)
+        self._add_missing_columns()
         self._conn.commit()
 
     @classmethod
@@ -158,6 +160,20 @@ class Tracker:
             raise
 
     # -- jobs --------------------------------------------------------------
+    # Columns added after the first release. `CREATE TABLE IF NOT EXISTS` will
+    # not add a column to a database that already exists, so add them here.
+    ADDED_COLUMNS: tuple[tuple[str, str], ...] = (("job", "claims_json TEXT"),)
+
+    def _add_missing_columns(self) -> None:
+        for table, definition in self.ADDED_COLUMNS:
+            column = definition.split()[0]
+            existing = {
+                str(r["name"]) for r in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+        self._conn.commit()
+
     def upsert_job(
         self, posting: JobPosting, status: Status = Status.NOT_STARTED
     ) -> str:
@@ -362,13 +378,30 @@ class Tracker:
 
     # -- cv ----------------------------------------------------------------
     def save_cv(
-        self, job_id: str, html_path: str, pdf_path: str | None, ats: dict[str, Any] | None = None
+        self,
+        job_id: str,
+        html_path: str,
+        pdf_path: str | None,
+        ats: dict[str, Any] | None = None,
+        claims: list[dict[str, Any]] | None = None,
     ) -> None:
+        """Record a CV, its ATS report and its grounding audit.
+
+        The audit is stored, not just printed: an ungrounded claim is the one
+        thing you must review before sending, and it used to scroll away.
+        """
         with self._tx() as conn:
             conn.execute(
-                "UPDATE job SET cv_html_path=?, cv_pdf_path=?, ats_json=?, updated_at=?"
-                " WHERE job_id=?",
-                (html_path, pdf_path, json.dumps(ats) if ats else None, _now(), job_id),
+                "UPDATE job SET cv_html_path=?, cv_pdf_path=?, ats_json=?,"
+                " claims_json=?, updated_at=? WHERE job_id=?",
+                (
+                    html_path,
+                    pdf_path,
+                    json.dumps(ats) if ats else None,
+                    json.dumps(claims) if claims else None,
+                    _now(),
+                    job_id,
+                ),
             )
 
     # -- contacts and outreach --------------------------------------------

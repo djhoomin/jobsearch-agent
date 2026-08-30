@@ -283,6 +283,56 @@ def output_stem(posting: JobPosting) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Whitespace compaction steps, least damaging first. Each is (regex, replacement,
+# description). Applied one at a time, re-rendering after each, until the CV
+# fits. Never touches content and never reintroduces an ATS hazard - the same
+# levers you would reach for by hand.
+FIT_STEPS: tuple[tuple[str, str, str], ...] = (
+    (r"(line-height:\s*)1\.3[5-9]", r"\g<1>1.32", "tightened line height"),
+    (r"(li\s*\{[^}]*margin-bottom:\s*)1\.[6-9]pt", r"\g<1>1.3pt", "tightened bullet spacing"),
+    (r"(h2\s*\{[^}]*margin:\s*)7pt 0 3\.5pt 0", r"\g<1>5.5pt 0 3pt 0", "tightened heading margins"),
+    (r"(\.entry\s*\{[^}]*margin-bottom:\s*)4pt", r"\g<1>2.5pt", "tightened entry spacing"),
+    (r"(font-size:\s*)9\.5pt", r"\g<1>9.2pt", "reduced body font size"),
+    (r"(line-height:\s*)1\.32", r"\g<1>1.28", "tightened line height further"),
+)
+
+
+def fit_to_pages(
+    cfg,
+    html: str,
+    html_path: Path,
+    pdf_path: Path,
+    max_pages: int,
+) -> tuple[str, int, list[str]]:
+    """Render, and compact whitespace until the CV fits the page limit.
+
+    Returns ``(html, page_count, notes)``. Content is never cut - that is a
+    judgement call for a human. If whitespace alone cannot make it fit, the
+    caller is told how many pages remain so it can say so plainly.
+    """
+    from .ats import extract_text
+    from .render import render_from_config
+
+    html_path.write_text(html, encoding="utf-8")
+    render_from_config(cfg, html_path, pdf_path)
+    pages = extract_text(pdf_path)[1]
+    notes: list[str] = []
+
+    for pattern, replacement, description in FIT_STEPS:
+        if pages <= max_pages:
+            break
+        compacted, count = re.subn(pattern, replacement, html, flags=re.IGNORECASE | re.DOTALL)
+        if not count:
+            continue
+        html = compacted
+        html_path.write_text(html, encoding="utf-8")
+        render_from_config(cfg, html_path, pdf_path)
+        pages = extract_text(pdf_path)[1]
+        notes.append(f"{description} -> {pages} page(s)")
+
+    return html, pages, notes
+
+
 def tailor_instructions(cfg: Config) -> str:
     """Fill the candidate-specific placeholders in TAILOR_INSTRUCTIONS.
 
@@ -347,9 +397,21 @@ def tailor_cv(
     )
 
     if render and not claude.dry_run:
-        from .render import render_from_config
-
-        result.pdf_path = str(render_from_config(cfg, html_path, pdf_path))
+        # Render, then compact whitespace until it fits. The model is not
+        # reliable about length, and a three-page CV fails the page check no
+        # matter how good the prose is.
+        max_pages = int(cfg.get("ats", "max_pages", 2) or 2)
+        html, pages, fit_notes = fit_to_pages(cfg, html, html_path, pdf_path, max_pages)
+        for note in fit_notes:
+            log.info("fit: %s", note)
+        result.pages = pages
+        result.fit_notes = fit_notes
+        if pages > max_pages:
+            log.warning(
+                "still %d pages after compaction (limit %d) - cut a bullet",
+                pages, max_pages,
+            )
+        result.pdf_path = str(pdf_path)
     elif render:
         log.info("[dry-run] would render %s", pdf_path)
         result.pdf_path = str(pdf_path)

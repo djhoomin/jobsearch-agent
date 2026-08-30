@@ -475,6 +475,21 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
         out.append(rule("SCORE"))
         out.append("  [dim]Not scored yet — press [b]s[/b].[/]")
 
+    claims_json = _get(row, "claims_json")
+    if claims_json:
+        claims = json.loads(claims_json)
+        ungrounded = [c for c in claims if not c.get("grounded")]
+        out.append(rule("GROUNDING AUDIT"))
+        if ungrounded:
+            out.append(f"  [yellow]{len(ungrounded)} claim(s) could not be traced to the dossier[/]")
+            for claim in ungrounded:
+                out.append(f"  [yellow]·[/] {e(claim.get('text', ''))}")
+                why = claim.get("why") or claim.get("reason") or ""
+                if why:
+                    out.append(f"    [dim]{e(why)}[/]")
+        else:
+            out.append(f"  [green]all {len(claims)} claim(s) traced to the dossier[/]")
+
     out.append(rule("YOUR NOTES"))
     if notes_rows:
         for note in notes_rows:
@@ -1406,7 +1421,13 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
 
             result = tailor_cv(posting, cfg, client)
             if not dry_run:
-                tracker.save_cv(job_id, str(result.html_path), result.pdf_path)
+                tracker.save_cv(
+                    job_id,
+                    str(result.html_path),
+                    result.pdf_path,
+                    None,
+                    [c.to_dict() for c in result.claims],
+                )
             ungrounded = len(result.ungrounded)
             flag = (
                 "[green]0 ungrounded claims[/]"
@@ -1414,7 +1435,9 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
                 else f"[yellow]{ungrounded} ungrounded claim(s) — review[/]"
             )
             name = Path(str(result.pdf_path or result.html_path)).name
-            return f"tailored {name}  {flag}  [dim]press v to verify[/]"
+            pages = f"  {result.pages}pp" if result.pages else ""
+            fit = f"  [dim]({len(result.fit_notes)} compaction step(s))[/]" if result.fit_notes else ""
+            return f"tailored {name}{pages}{fit}  {flag}  [dim]press v to verify[/]"
 
         if stage == "outreach":
             from .outreach import draft_outreach

@@ -272,7 +272,13 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
                 print("The rendered PDF FAILED ATS verification. Fix before sending.")
 
         if not args.dry_run:
-            tracker.save_cv(job_id, result.html_path, result.pdf_path, ats_payload)
+            tracker.save_cv(
+                job_id,
+                result.html_path,
+                result.pdf_path,
+                ats_payload,
+                [c.to_dict() for c in result.claims],
+            )
 
         if result.ungrounded:
             print()

@@ -274,6 +274,8 @@ class TailorResult:
     claims: list[Claim] = field(default_factory=list)
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    pages: int | None = None
+    fit_notes: list[str] = field(default_factory=list)
 
     @property
     def ungrounded(self) -> list[Claim]:

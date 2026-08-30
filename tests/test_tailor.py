@@ -273,3 +273,68 @@ class TestProtectKeywords:
         html, notes = harden_html("<p>cross-functional</p>", self.KEYWORDS)
         assert '<span class="nb">cross-functional</span>' in html
         assert any("protected keyword" in n for n in notes)
+
+
+class TestFitToPages:
+    """The model is not reliable about length; a 3-page CV fails the page
+    check no matter how good the prose is. Whitespace is compacted until it
+    fits - content is never cut, because that is a judgement call.
+    """
+
+    def _html(self, cfg, body_repeats: int) -> str:
+        base = cfg.base_cv.read_text(encoding="utf-8")
+        filler = "<div class='entry'><ul>" + "".join(
+            f"<li>Padding bullet number {i} with enough text to occupy a full line of the page.</li>"
+            for i in range(body_repeats)
+        ) + "</ul></div>"
+        return base.replace("</body>", filler + "</body>") if "</body>" in base else base + filler
+
+    def test_a_short_cv_is_left_alone(self, cfg, tmp_path):
+        from jobsearch.tailor import fit_to_pages
+
+        html = cfg.base_cv.read_text(encoding="utf-8")
+        out, pages, notes = fit_to_pages(
+            cfg, html, tmp_path / "a.html", tmp_path / "a.pdf", max_pages=2
+        )
+        assert pages <= 2
+        assert notes == [], "nothing to compact when it already fits"
+        assert out == html
+
+    def test_an_overlong_cv_is_compacted_until_it_fits(self, cfg, tmp_path):
+        from jobsearch.tailor import fit_to_pages
+
+        html = self._html(cfg, 90)
+        out, pages, notes = fit_to_pages(
+            cfg, html, tmp_path / "b.html", tmp_path / "b.pdf", max_pages=2
+        )
+        assert notes, "compaction steps should have been applied"
+        assert out != html
+
+    def test_it_gives_up_rather_than_shrinking_forever(self, cfg, tmp_path):
+        """Whitespace cannot fix everything; the caller is told what remains."""
+        from jobsearch.tailor import FIT_STEPS, fit_to_pages
+
+        html = self._html(cfg, 600)
+        _, pages, notes = fit_to_pages(
+            cfg, html, tmp_path / "c.html", tmp_path / "c.pdf", max_pages=2
+        )
+        assert len(notes) <= len(FIT_STEPS)
+        assert pages > 2, "this fixture is far too long to fit"
+
+    def test_compaction_only_touches_whitespace(self, cfg, tmp_path):
+        """The base CV legitimately sets `letter-spacing: 0`; compaction must
+        leave the ATS-critical declarations exactly as it found them."""
+        import re
+
+        from jobsearch.tailor import fit_to_pages
+
+        html = self._html(cfg, 90)
+        out, _, _ = fit_to_pages(
+            cfg, html, tmp_path / "d.html", tmp_path / "d.pdf", max_pages=2
+        )
+
+        def critical(text: str) -> list[str]:
+            return re.findall(r"(letter-spacing:\s*[^;]+|font-variant:\s*[^;]+)", text)
+
+        assert critical(out) == critical(html)
+        assert "white-space: nowrap" in out

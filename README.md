@@ -138,6 +138,13 @@ sum to 1.0 before anything is written, and the config reloads without
 restarting. `ctrl+e` opens `search-strategy.md` in `$EDITOR` — the scorer reads
 that prose directly, so it is where judgement belongs, not a form.
 
+After rendering, `tailor` compacts whitespace until the CV fits the page
+limit — line height, bullet spacing, heading margins, then font size — and
+re-renders after each step. It never cuts content: that is a judgement call, so
+if whitespace alone cannot make it fit you are told how many pages remain. The
+grounding audit is stored alongside the CV and shown on the role page, rather
+than scrolling past once.
+
 **Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
 `upsert_job` never clobbers the status of an existing job — so a dismissed role
 stays dismissed the next time `discover` sweeps its board. A deleted one comes
