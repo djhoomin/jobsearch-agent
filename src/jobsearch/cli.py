@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -585,6 +586,15 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def cmd_attach_cv(cfg: Config, args: argparse.Namespace) -> int:
+    """Record a CV written outside the tool against a role."""
+    from .tui import attach_cv_blocking
+
+    message = attach_cv_blocking(cfg, args.job_id, args.path, verify=not args.no_verify)
+    print(re.sub(r"\[/?[a-z]*\]", "", message))
+    return 0
+
+
 def cmd_setup(cfg: Config | None, args: argparse.Namespace) -> int:
     """Guided first run. Deliberately does not require an existing config."""
     from .setup_wizard import SetupAborted, default_repo_root, run_setup
@@ -906,6 +916,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_run)
 
     # doctor
+    p = sub.add_parser(
+        "attach-cv",
+        help="Point a role at a CV you already made",
+        description=(
+            "Record an existing CV file against a role, and verify it if it is "
+            "a PDF. For CVs tailored by hand outside this tool."
+        ),
+    )
+    p.add_argument("job_id")
+    p.add_argument("path", help="Path to the .pdf or .html CV")
+    p.add_argument("--no-verify", action="store_true", help="Skip the ATS check")
+    p.set_defaults(func=cmd_attach_cv)
+
     p = sub.add_parser(
         "setup",
         help="Guided first-run setup: write config.local.toml",

@@ -107,6 +107,7 @@ behaviour cannot drift between the two.
 | `v` | Run the ATS verifier on its CV |
 | `enter` | Open the role page: constraints, per-dimension reasoning, notes, drafts |
 | `w` | Open the posting in your browser |
+| `c` | Attach a CV you already made (on the role page) |
 | `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
 | `n` | Add a role you found yourself; `ctrl+s` saves |
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |

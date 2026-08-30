@@ -8,6 +8,7 @@ real terminal is involved.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -728,3 +729,71 @@ class TestRolePage:
         markup = role_detail_markup(cfg, seed(cfg))
         assert "Not scored yet" in markup
         assert "No contacts yet" in markup
+
+
+class TestAttachCv:
+    """For CVs tailored by hand before the tool existed."""
+
+    def _pdf(self, cfg, tmp_path):
+        """Render a fixture CV to a real PDF via the same path the tool uses."""
+        from jobsearch.render import render_from_config
+
+        html = tmp_path / "hand_made.html"
+        html.write_text((cfg.base_cv).read_text(encoding="utf-8"), encoding="utf-8")
+        return render_from_config(cfg, html, tmp_path / "hand_made.pdf")
+
+    def test_it_records_the_pdf_against_the_role(self, cfg, tmp_path):
+        from jobsearch.tui import attach_cv_blocking
+
+        job_id = seed(cfg)
+        pdf = self._pdf(cfg, tmp_path)
+        message = attach_cv_blocking(cfg, job_id, pdf)
+        assert "hand_made.pdf" in message
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.get_job(job_id)["cv_pdf_path"] == str(Path(pdf).resolve())
+
+    def test_it_picks_up_a_sibling_html(self, cfg, tmp_path):
+        from jobsearch.tui import attach_cv_blocking
+
+        job_id = seed(cfg)
+        pdf = self._pdf(cfg, tmp_path)
+        attach_cv_blocking(cfg, job_id, pdf)
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.get_job(job_id)["cv_html_path"].endswith("hand_made.html")
+
+    def test_it_verifies_by_default_and_stores_the_report(self, cfg, tmp_path):
+        from jobsearch.tui import attach_cv_blocking
+
+        job_id = seed(cfg)
+        message = attach_cv_blocking(cfg, job_id, self._pdf(cfg, tmp_path))
+        assert "ATS" in message
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.get_job(job_id)["ats_json"], "the report should be stored"
+
+    def test_no_verify_skips_the_check(self, cfg, tmp_path):
+        from jobsearch.tui import attach_cv_blocking
+
+        job_id = seed(cfg)
+        message = attach_cv_blocking(cfg, job_id, self._pdf(cfg, tmp_path), verify=False)
+        assert "ATS" not in message
+
+    def test_a_missing_file_is_a_clear_error(self, cfg):
+        from jobsearch.tui import attach_cv_blocking
+
+        with pytest.raises(FileNotFoundError, match="No such file"):
+            attach_cv_blocking(cfg, seed(cfg), "/nope/missing.pdf")
+
+    def test_candidate_files_are_newest_first(self, cfg, tmp_path):
+        import os
+
+        from jobsearch.tui import candidate_cv_files
+
+        folder = cfg.base_cv.parent
+        old, new = folder / "old_cv.pdf", folder / "new_cv.pdf"
+        old.write_bytes(b"%PDF-1.4\n"); new.write_bytes(b"%PDF-1.4\n")
+        os.utime(old, (1_000_000, 1_000_000))
+        try:
+            names = [p.name for p in candidate_cv_files(cfg)]
+            assert names.index("new_cv.pdf") < names.index("old_cv.pdf")
+        finally:
+            old.unlink(); new.unlink()

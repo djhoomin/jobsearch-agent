@@ -306,6 +306,64 @@ def outreach_detail_text(cfg: Config, job_id: str) -> str:
     return "\n".join(lines)
 
 
+def candidate_cv_files(cfg: Config) -> list[Path]:
+    """CVs already on disk: alongside the base CV, and in the output folder.
+
+    Sorted newest first, because the one you just made is the one you want.
+    """
+    seen: dict[Path, float] = {}
+    for folder in (cfg.base_cv.parent, cfg.output_dir / "cv", cfg.output_dir):
+        if not folder.is_dir():
+            continue
+        for pattern in ("*.pdf", "*.html"):
+            for path in folder.glob(pattern):
+                if path.is_file() and not path.name.startswith("."):
+                    seen[path.resolve()] = path.stat().st_mtime
+    return sorted(seen, key=lambda p: -seen[p])
+
+
+def attach_cv_blocking(
+    cfg: Config, job_id: str, path: str | Path, *, verify: bool = True
+) -> str:
+    """Record an existing CV against a role, verifying it if it is a PDF.
+
+    For CVs written outside the tool - the ones you tailored by hand before any
+    of this existed - so the tracker and the xlsx export know they exist.
+    """
+    from .tracker import Tracker
+
+    cv = Path(path).expanduser()
+    if not cv.is_file():
+        raise FileNotFoundError(f"No such file: {cv}")
+
+    html_path, pdf_path = "", ""
+    if cv.suffix.lower() == ".pdf":
+        pdf_path = str(cv.resolve())
+        sibling = cv.with_suffix(".html")
+        html_path = str(sibling.resolve()) if sibling.is_file() else ""
+    else:
+        html_path = str(cv.resolve())
+        sibling = cv.with_suffix(".pdf")
+        pdf_path = str(sibling.resolve()) if sibling.is_file() else ""
+
+    report = None
+    note = ""
+    if verify and pdf_path:
+        from .ats import verify_from_config
+
+        with Tracker.from_config(cfg) as tracker:
+            posting = tracker.get_posting(tracker.resolve_job_id(job_id))
+        report = verify_from_config(cfg, pdf_path, posting.description or "")
+        note = f"  ATS {'[green]PASS[/]' if report.passed else '[red]FAIL[/]'} ({report.page_count}pp)"
+
+    with Tracker.from_config(cfg) as tracker:
+        resolved = tracker.resolve_job_id(job_id)
+        tracker.save_cv(
+            resolved, html_path, pdf_path or None, report.to_dict() if report else None
+        )
+    return f"attached [b]{cv.name}[/]{note}"
+
+
 def role_detail_markup(cfg: Config, job_id: str) -> str:
     """The role page as Rich markup, with every dynamic value escaped.
 
@@ -833,6 +891,46 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def action_cancel(self) -> None:
             self.dismiss(None)
 
+    class AttachCvScreen(ModalScreen):  # type: ignore[misc]
+        """Pick a CV already on disk, or type a path."""
+
+        BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+        def __init__(self, cfg: Config, job_id: str) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.job_id = job_id
+            self.files = candidate_cv_files(cfg)
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="picker"):
+                yield Static("Attach a CV  [dim]— newest first, or type a path below[/]")
+                yield OptionList(*[f.name for f in self.files] or ["(none found)"], id="cvs")
+                yield Input(placeholder="…or a full path, then Enter", id="cvpath")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#cvs", OptionList).focus()
+
+        def _attach(self, path: Any) -> None:
+            try:
+                self.dismiss(attach_cv_blocking(self.cfg, self.job_id, path))
+            except Exception as exc:  # noqa: BLE001 - shown on the role page
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+
+        def on_option_list_option_selected(self, event: Any) -> None:
+            if not self.files:
+                self.dismiss(None)
+                return
+            self._attach(self.files[event.option_index])
+
+        def on_input_submitted(self, event: Any) -> None:
+            if event.value.strip():
+                self._attach(event.value.strip())
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
     class ConfirmDeleteScreen(ModalScreen):  # type: ignore[misc]
         """Deletion is irreversible, so it asks. Dismissal (d) does not."""
 
@@ -961,6 +1059,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("o", "stage('outreach')", "Outreach"),
             Binding("v", "stage('verify')", "Verify"),
             Binding("w", "open_url", "Open posting"),
+            Binding("c", "attach_cv", "Attach CV"),
         ]
 
         def __init__(self, cfg: Config, job_id: str) -> None:
@@ -1006,6 +1105,14 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def action_dismiss_screen(self) -> None:
             self.dismiss()
+
+        def action_attach_cv(self) -> None:
+            self.app.push_screen(AttachCvScreen(self.cfg, self.job_id), self.after_attach)
+
+        def after_attach(self, message: str | None) -> None:
+            if message:
+                self.query_one("#rolestatus", Static).update(f"  {message}")
+                self.refresh_body()
 
         def action_open_url(self) -> None:
             import webbrowser
