@@ -89,10 +89,10 @@ behaviour cannot drift between the two.
 ┌ jobsearch ─────────────────────────────────────────────┐
 │ Pipeline (14)         [/] filter                       │
 ├────────────────────────────────────────────────────────┤
-│ ▸ Northwind    Dir. Eng, AI      4.15  ● Applied       │
-│   Contoso AI   Head of AI        3.90  ○ Not started   │
-│   Initech      Dir. Research     3.55  ◐ Scored        │
-│   Example Co   VP AI             elim  ✗ Eliminated    │
+│ ▸ Northwind   Dir. Eng, AI  ✓ Amsterdam   4.15 ● Applied│
+│   Contoso AI  Head of AI    ✓ Remote (EU)  3.90 ○ New   │
+│   Initech     Dir. Research ? Spain        3.55 ◐ Scored│
+│   Example Co  VP AI         ✗ Remote - US  elim ✗ Elim  │
 ├─ Northwind — Director of Engineering, AI ──────────────┤
 │ score 4.15   buyer 4 │ role_fit 5 │ company 4 │ ...    │
 │ cv    output/cv/CV_Northwind.pdf                       │
@@ -106,9 +106,16 @@ behaviour cannot drift between the two.
 | `o` | Draft outreach |
 | `v` | Run the ATS verifier on its CV |
 | `enter` | Read the drafted contacts and outreach messages |
+| `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
+| `n` | Add a role you found yourself; `ctrl+s` saves |
 | `/` | Filter by company or title (`esc` clears) |
 | `r` | Reload from the tracker |
 | `q` | Quit |
+
+The location column carries a fitness glyph from the same `check_location` the
+scorer uses, so the table cannot disagree with what elimination will decide:
+`✓` workable, `✗` outside Amsterdam / NL-hybrid / remote-EU, `?` unclassifiable.
+A bare "remote" is not a pass — `Remote - United States` is a US role.
 
 Stages run on a worker thread, so a long tailoring call does not freeze the
 table, and results stream into the log pane at the bottom. `--dry-run` works

@@ -82,6 +82,74 @@ def truncate(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(0, width - 1)] + "…"
 
 
+def allowed_statuses(current: str) -> list[str]:
+    """Statuses the tracker will actually accept from `current`, minus itself."""
+    from .models import TRANSITIONS
+
+    try:
+        status = Status.parse(current)
+    except Exception:
+        return [s.value for s in Status]
+    return sorted(s.value for s in TRANSITIONS.get(status, set()))
+
+
+def set_status_blocking(cfg: Config, job_id: str, target: str) -> str:
+    """Apply a status transition. Raises if the tracker rejects it."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        tracker.set_status(job_id, Status.parse(target), reason="set from the TUI")
+    return target
+
+
+def add_role_blocking(
+    cfg: Config,
+    *,
+    company: str,
+    title: str,
+    url: str = "",
+    location: str = "",
+    description: str = "",
+) -> str:
+    """Insert a hand-entered role, the same way `jobsearch add` does."""
+    from .models import JobPosting, make_job_id
+    from .tracker import Tracker
+
+    if not company.strip() or not title.strip():
+        raise ValueError("company and title are required")
+    posting = JobPosting(
+        company=company.strip(),
+        title=title.strip(),
+        url=url.strip(),
+        location=location.strip(),
+        description=description.strip(),
+        source="manual",
+        job_id=make_job_id(company, title, url),
+    )
+    with Tracker.from_config(cfg) as tracker:
+        return tracker.upsert_job(posting)
+
+
+def location_cell(row: Any, cfg: Config) -> str:
+    """Location plus a fitness glyph, using the same check the scorer uses.
+
+    Deliberately calls check_location rather than re-deriving the rules, so the
+    table can never disagree with what elimination will decide. A bare "remote"
+    is not a pass: "Remote - United States" is a US role.
+    """
+    from .models import JobPosting, Verdict
+    from .scoring import check_location
+
+    location = str(_get(row, "location", "") or "")
+    if not location:
+        return "?  —"
+    verdict = check_location(JobPosting(company="", title="", url="", location=location), cfg).verdict
+    glyph = {Verdict.PASS: "✓", Verdict.FAIL: "✗", Verdict.UNKNOWN: "?"}[verdict]
+    remote = " · remote" if "remote" in location.lower() else ""
+    return f"{glyph} {truncate(location, 26)}{remote}"
+
+
 def outreach_detail_text(cfg: Config, job_id: str) -> str:
     """Plain text of the contacts and drafted messages for one job.
 
@@ -142,7 +210,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
     from textual.screen import ModalScreen
     from textual.binding import Binding
     from textual.containers import Vertical, VerticalScroll
-    from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
+    from textual.widgets import (
+        DataTable, Footer, Header, Input, OptionList, RichLog, Static, TextArea,
+    )
 
     class JobSearchTUI(App):  # type: ignore[misc]
         """Pipeline browser: pick a role, run a stage, watch the result."""
@@ -152,6 +222,10 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         #table { height: 1fr; min-height: 6; }
         #detail { height: auto; max-height: 16; border-top: solid $accent; padding: 0 1; }
         #outreach { padding: 1 2; height: 1fr; }
+        #picker { padding: 1 2; height: auto; background: $surface; border: solid $accent; }
+        #newrole { padding: 1 2; height: 1fr; background: $surface; border: solid $accent; }
+        #newrole Input { margin-bottom: 1; }
+        #f-description { height: 12; }
         #log { height: 8; border-top: solid $accent; padding: 0 1; }
         #filter { display: none; }
         #filter.visible { display: block; }
@@ -163,6 +237,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("o", "stage('outreach')", "Outreach"),
             Binding("v", "stage('verify')", "Verify"),
             Binding("enter", "open_outreach", "Read drafts"),
+            Binding("a", "set_status", "Status"),
+            Binding("n", "new_role", "Add role"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
@@ -194,7 +270,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def on_mount(self) -> None:
             table = self.query_one("#table", DataTable)
-            table.add_columns("Company", "Title", "Score", "Status")
+            table.add_columns("Company", "Title", "Location", "Score", "Status")
             table.focus()
             self.title = "jobsearch"
             self.sub_title = str(self.cfg.source or self.cfg.root)
@@ -226,8 +302,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.rows = self.load_rows()
             for row in self.rows:
                 table.add_row(
-                    truncate(_get(row, "company", ""), 22),
-                    truncate(_get(row, "title", ""), 38),
+                    truncate(_get(row, "company", ""), 20),
+                    truncate(_get(row, "title", ""), 32),
+                    location_cell(row, self.cfg),
                     score_cell(row),
                     f"{status_glyph(str(_get(row, 'status', '')))} {_get(row, 'status', '')}",
                 )
@@ -298,6 +375,29 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def on_data_table_row_highlighted(self, _event: Any) -> None:
             self.update_detail()
 
+        def action_set_status(self) -> None:
+            row = self.selected_row()
+            if row is None:
+                self.log_line("[yellow]nothing selected[/]")
+                return
+            self.push_screen(
+                StatusScreen(str(_get(row, "job_id", "")), str(_get(row, "status", ""))),
+                self.after_status,
+            )
+
+        def after_status(self, result: str | None) -> None:
+            if result:
+                self.log_line(result)
+            self.action_refresh_rows()
+
+        def action_new_role(self) -> None:
+            self.push_screen(NewRoleScreen(), self.after_new_role)
+
+        def after_new_role(self, result: str | None) -> None:
+            if result:
+                self.log_line(result)
+            self.action_refresh_rows()
+
         def action_open_outreach(self) -> None:
             row = self.selected_row()
             if row is None:
@@ -361,6 +461,85 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def finish_stage(self) -> None:
             self.busy = False
             self.action_refresh_rows()
+
+    class StatusScreen(ModalScreen):  # type: ignore[misc]
+        """Pick a new status, offering only transitions the tracker allows."""
+
+        BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+        def __init__(self, job_id: str, current: str) -> None:
+            super().__init__()
+            self.job_id = job_id
+            self.current = current
+
+        def compose(self) -> ComposeResult:
+            options = allowed_statuses(self.current)
+            with Vertical(id="picker"):
+                yield Static(f"Status — currently [b]{self.current}[/]")
+                yield OptionList(*options, id="statuses")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#statuses", OptionList).focus()
+
+        def on_option_list_option_selected(self, event: Any) -> None:
+            target = str(event.option.prompt)
+            try:
+                set_status_blocking(cfg, self.job_id, target)
+            except Exception as exc:  # noqa: BLE001 - reported into the log pane
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.dismiss(f"status → [b]{target}[/]")
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class NewRoleScreen(ModalScreen):  # type: ignore[misc]
+        """Add a role found outside the configured boards."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel"),
+            Binding("ctrl+s", "save", "Save"),
+        ]
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="newrole"):
+                yield Static("[b]Add a role[/]  —  company and title required, ctrl+s to save")
+                yield Input(placeholder="company *", id="f-company")
+                yield Input(placeholder="title *", id="f-title")
+                yield Input(placeholder="url", id="f-url")
+                yield Input(placeholder="location", id="f-location")
+                yield Static("[dim]description — paste the posting[/]")
+                yield TextArea(id="f-description")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#f-company", Input).focus()
+
+        def action_save(self) -> None:
+            def value(name: str) -> str:
+                return self.query_one(f"#f-{name}", Input).value.strip()
+
+            company, title = value("company"), value("title")
+            if not company or not title:
+                self.notify("company and title are required", severity="warning")
+                return
+            try:
+                job_id = add_role_blocking(
+                    cfg,
+                    company=company,
+                    title=title,
+                    url=value("url"),
+                    location=value("location"),
+                    description=self.query_one("#f-description", TextArea).text,
+                )
+            except Exception as exc:  # noqa: BLE001 - reported into the log pane
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.dismiss(f"added [b]{company}[/] [dim]({job_id})[/]")
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
 
     class OutreachScreen(ModalScreen):  # type: ignore[misc]
         """Full contacts and drafted messages for one job."""
