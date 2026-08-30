@@ -458,6 +458,26 @@ def cmd_show(cfg: Config, args: argparse.Namespace) -> int:
             print("  contacts:")
             for contact in contacts:
                 print(f"    {contact['name'] or contact['title']}: {contact['search_url']}")
+        draft = tracker.latest_outreach(job_id)
+        if draft:
+            print(f"  outreach:  drafted {draft['created_at'][:10]}"
+                  f"{'  (marked sent)' if draft['sent'] else '  (nothing sent)'}")
+            for label, key in (
+                ("connection note", "connection_note"),
+                ("linkedin message", "linkedin_message"),
+            ):
+                body = (draft[key] or "").strip()
+                if body:
+                    print(f"    {label}:")
+                    for line in body.splitlines():
+                        print(f"      {line}")
+            if (draft["email_subject"] or "").strip():
+                print(f"    email subject: {draft['email_subject']}")
+            body = (draft["email_body"] or "").strip()
+            if body:
+                print("    email body:")
+                for line in body.splitlines():
+                    print(f"      {line}")
         notes = tracker.notes(job_id)
         if notes:
             print("  notes:")

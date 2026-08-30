@@ -160,3 +160,75 @@ class TestApp:
                 assert app.dry_run is True
 
         self._run(scenario())
+
+
+class TestOutreachView:
+    """Regression: drafted contacts and messages were generated but unreadable.
+
+    The outreach stage reported "4 likely contact(s)" and then offered no way
+    to see them, in the TUI or in `jobsearch show`.
+    """
+
+    def test_it_lists_contacts_and_drafts(self, cfg):
+        from jobsearch.models import Contact, OutreachDraft
+        from jobsearch.tui import outreach_detail_text
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            # Contacts ride on the draft: save_outreach replaces whatever the
+            # job already had, so saving them separately first would be undone.
+            tracker.save_outreach(
+                OutreachDraft(
+                    job_id=job_id,
+                    contacts=[Contact(title="VP Engineering", linkedin_search_url="https://x.test/1")],
+                    linkedin_message="Saw the posting.",
+                    email_subject="Subject line",
+                    email_body="Hi [name],\n\nBody.",
+                )
+            )
+        text = outreach_detail_text(cfg, job_id)
+        assert "VP Engineering" in text
+        assert "https://x.test/1" in text
+        assert "Saw the posting." in text
+        assert "Subject line" in text
+        # The literal placeholder must survive: Textual markup would eat it.
+        assert "[name]" in text
+
+    def test_it_says_so_when_there_is_no_outreach_yet(self, cfg):
+        from jobsearch.tui import outreach_detail_text
+
+        assert "No contacts yet" in outreach_detail_text(cfg, seed(cfg))
+
+    def test_enter_opens_the_screen(self, cfg):
+        from jobsearch.models import Contact
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_contacts(job_id, [Contact(title="VP Engineering", linkedin_search_url="https://x.test/1")])
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.action_open_outreach()
+                await pilot.pause()
+                assert len(app.screen_stack) == 2
+
+        asyncio.run(scenario())
+
+
+def test_save_outreach_replaces_contacts(cfg):
+    """Documented sharp edge: a draft owns its contacts and overwrites them.
+
+    Saving a draft whose `contacts` list is empty clears any contacts the job
+    already had. Real callers attach contacts to the draft, which is why this
+    is documented rather than guarded.
+    """
+    from jobsearch.models import Contact, OutreachDraft
+
+    job_id = seed(cfg)
+    with Tracker.from_config(cfg) as tracker:
+        tracker.save_contacts(job_id, [Contact(title="VP Engineering")])
+        assert len(tracker.contacts(job_id)) == 1
+        tracker.save_outreach(OutreachDraft(job_id=job_id, linkedin_message="x"))
+        assert tracker.contacts(job_id) == []

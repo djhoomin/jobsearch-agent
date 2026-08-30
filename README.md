@@ -105,6 +105,7 @@ behaviour cannot drift between the two.
 | `t` | Tailor a CV for it |
 | `o` | Draft outreach |
 | `v` | Run the ATS verifier on its CV |
+| `enter` | Read the drafted contacts and outreach messages |
 | `/` | Filter by company or title (`esc` clears) |
 | `r` | Reload from the tracker |
 | `q` | Quit |

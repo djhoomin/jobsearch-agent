@@ -82,14 +82,66 @@ def truncate(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(0, width - 1)] + "…"
 
 
+def outreach_detail_text(cfg: Config, job_id: str) -> str:
+    """Plain text of the contacts and drafted messages for one job.
+
+    Returned without Textual markup: drafts contain literal square brackets
+    (``Hi [name],``) that markup parsing would swallow.
+    """
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        row = tracker.get_job(job_id)
+        contacts = tracker.contacts(job_id)
+        draft = tracker.latest_outreach(job_id)
+
+    lines = [f"{_get(row, 'company', '')} — {_get(row, 'title', '')}", ""]
+
+    if contacts:
+        lines.append(f"LIKELY CONTACTS ({len(contacts)}) — open these searches yourself:")
+        for contact in contacts:
+            label = _get(contact, "name") or _get(contact, "title", "contact")
+            lines.append(f"  · {label}")
+            url = _get(contact, "search_url")
+            if url:
+                lines.append(f"    {url}")
+        lines.append("")
+    else:
+        lines += ["No contacts yet — press o to draft outreach.", ""]
+
+    if draft:
+        sent = "marked sent" if _get(draft, "sent") else "nothing sent"
+        lines.append(f"DRAFTS (created {str(_get(draft, 'created_at', ''))[:10]}, {sent})")
+        for label, key in (
+            ("Connection note", "connection_note"),
+            ("LinkedIn message", "linkedin_message"),
+        ):
+            body = str(_get(draft, key, "")).strip()
+            if body:
+                lines += ["", f"-- {label} --", body]
+        subject = str(_get(draft, "email_subject", "")).strip()
+        body = str(_get(draft, "email_body", "")).strip()
+        if subject or body:
+            lines += ["", "-- Email --"]
+            if subject:
+                lines.append(f"Subject: {subject}")
+            if body:
+                lines += ["", body]
+
+    lines += ["", f"Full copy-pasteable version:  jobsearch show {job_id}"]
+    return "\n".join(lines)
+
+
 def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
     """Construct the Textual app. Imports Textual lazily so import is cheap."""
     _require_textual()
 
     from textual import work
     from textual.app import App, ComposeResult
+    from textual.screen import ModalScreen
     from textual.binding import Binding
-    from textual.containers import Vertical
+    from textual.containers import Vertical, VerticalScroll
     from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
 
     class JobSearchTUI(App):  # type: ignore[misc]
@@ -99,6 +151,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         Screen { layout: vertical; }
         #table { height: 1fr; min-height: 6; }
         #detail { height: auto; max-height: 16; border-top: solid $accent; padding: 0 1; }
+        #outreach { padding: 1 2; height: 1fr; }
         #log { height: 8; border-top: solid $accent; padding: 0 1; }
         #filter { display: none; }
         #filter.visible { display: block; }
@@ -109,6 +162,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("t", "stage('tailor')", "Tailor"),
             Binding("o", "stage('outreach')", "Outreach"),
             Binding("v", "stage('verify')", "Verify"),
+            Binding("enter", "open_outreach", "Read drafts"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
@@ -225,10 +279,30 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
             cv = _get(row, "cv_pdf_path") or _get(row, "cv_html_path")
             lines.append(f"cv   {cv}" if cv else "[dim]cv   none yet — press [b]t[/b][/]")
+
+            count = self.contact_count(str(_get(row, "job_id", "")))
+            if count:
+                lines.append(f"outreach  {count} contact(s) drafted — press [b]enter[/] to read")
+            else:
+                lines.append("[dim]outreach  none yet — press [b]o[/b][/]")
             return "\n".join(lines)
+
+        def contact_count(self, job_id: str) -> int:
+            if not job_id:
+                return 0
+            from .tracker import Tracker
+
+            with Tracker.from_config(self.cfg) as tracker:
+                return len(tracker.contacts(job_id))
 
         def on_data_table_row_highlighted(self, _event: Any) -> None:
             self.update_detail()
+
+        def action_open_outreach(self) -> None:
+            row = self.selected_row()
+            if row is None:
+                return
+            self.push_screen(OutreachScreen(self.cfg, str(_get(row, "job_id", ""))))
 
         # -- filtering ----------------------------------------------------
 
@@ -287,6 +361,25 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def finish_stage(self) -> None:
             self.busy = False
             self.action_refresh_rows()
+
+    class OutreachScreen(ModalScreen):  # type: ignore[misc]
+        """Full contacts and drafted messages for one job."""
+
+        BINDINGS = [Binding("escape,q,enter", "dismiss_screen", "Back")]
+
+        def __init__(self, cfg: Config, job_id: str) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.job_id = job_id
+
+        def compose(self) -> ComposeResult:
+            with VerticalScroll(id="outreach"):
+                # markup=False: drafts contain literal [name] placeholders.
+                yield Static(outreach_detail_text(self.cfg, self.job_id), markup=False)
+            yield Footer()
+
+        def action_dismiss_screen(self) -> None:
+            self.dismiss()
 
     return JobSearchTUI()
 
