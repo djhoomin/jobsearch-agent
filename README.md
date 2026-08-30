@@ -473,6 +473,23 @@ Then `jobsearch doctor --boards` to confirm the token resolves.
 
 ---
 
+## Cost
+
+A Claude Pro/Max subscription does not cover this: it calls the Anthropic API
+directly, so usage bills to the API platform whether you authenticate with
+`ANTHROPIC_API_KEY` or an `ant auth login` profile.
+
+What is available instead:
+
+- **Prompt caching**, below — the dossier and base CV are a large stable prefix,
+  and caching them is the single biggest saving.
+- **Per-stage models and effort** — `[claude.stages]` in the config. Keep
+  `tailor` on the strongest model; `outreach` and `score` tolerate less. Caches
+  are model-scoped, so mixing models forfeits cache reuse between the stages
+  that differ.
+- **Do not downgrade `ground`.** It is the check that catches an invented claim
+  on a CV you are about to send. Saving pennies there is the wrong trade.
+
 ## Prompt caching
 
 The dossier, base CV and strategy are ~40KB of context re-sent on every scoring,

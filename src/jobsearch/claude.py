@@ -66,6 +66,11 @@ class ClaudeClient:
     streaming_max_tokens: int = 64000
     effort: str = "high"
     cache_ttl: str = "1h"
+    #: Per-stage {"model": ..., "effort": ...} overrides, keyed by stage name.
+    #: A stage with no entry uses the defaults above. Caches are model-scoped,
+    #: so mixing models across stages forfeits cache reuse between them - worth
+    #: it only where a stage is both frequent and undemanding.
+    stage_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
     dry_run: bool = False
     #: Called with (stage_name, prompt_summary) when ``dry_run`` is on.
     dry_run_hook: Callable[[str, str], None] | None = None
@@ -95,8 +100,21 @@ class ClaudeClient:
             streaming_max_tokens=int(section.get("streaming_max_tokens", 64000)),
             effort=section.get("effort", "high"),
             cache_ttl=section.get("cache_ttl", "1h"),
+            stage_overrides={
+                str(name): dict(values)
+                for name, values in (section.get("stages", {}) or {}).items()
+                if isinstance(values, dict)
+            },
             dry_run=dry_run,
         )
+
+    def model_for(self, stage: str) -> str:
+        """The model this stage should use."""
+        return str(self.stage_overrides.get(stage, {}).get("model", self.model))
+
+    def effort_for(self, stage: str) -> str:
+        """The effort level this stage should use."""
+        return str(self.stage_overrides.get(stage, {}).get("effort", self.effort))
 
     @property
     def last_usage(self) -> Usage:
@@ -151,11 +169,11 @@ class ClaudeClient:
         response = self._call(
             stage,
             lambda: self.client.messages.create(
-                model=self.model,
+                model=self.model_for(stage),
                 max_tokens=max_tokens or self.max_tokens,
                 thinking={"type": "adaptive"},
                 output_config={
-                    "effort": self.effort,
+                    "effort": self.effort_for(stage),
                     "format": {"type": "json_schema", "schema": schema},
                 },
                 system=self.system_blocks(instructions, stable_context),
@@ -190,10 +208,10 @@ class ClaudeClient:
         def run() -> str:
             chunks: list[str] = []
             with self.client.messages.stream(
-                model=self.model,
+                model=self.model_for(stage),
                 max_tokens=max_tokens or self.streaming_max_tokens,
                 thinking={"type": "adaptive"},
-                output_config={"effort": self.effort},
+                output_config={"effort": self.effort_for(stage)},
                 system=self.system_blocks(instructions, stable_context),
                 messages=[{"role": "user", "content": user_content}],
             ) as stream:
@@ -219,7 +237,7 @@ class ClaudeClient:
             return fn()
         except anthropic.NotFoundError as exc:
             raise ClaudeError(
-                f"{stage}: model or endpoint not found ({self.model}). {exc.message}"
+                f"{stage}: model or endpoint not found ({self.model_for(stage)}). {exc.message}"
             ) from exc
         except anthropic.AuthenticationError as exc:
             raise ClaudeError(

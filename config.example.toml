@@ -27,6 +27,14 @@ effort = "high"
 # Cache the dossier + base CV prefix. Verify with usage.cache_read_input_tokens.
 cache_ttl = "1h"
 
+# Optional per-stage overrides. A stage with no entry uses the values above.
+# Caches are model-scoped, so mixing models forfeits cache reuse between the
+# stages that differ - worth it only where a stage is frequent and undemanding.
+# Do not downgrade `ground`: it is the check that catches an invented claim.
+# [claude.stages]
+# score    = { effort = "medium" }
+# outreach = { model = "claude-sonnet-5" }
+
 [candidate]
 name = "Your Name"
 email = "you@example.com"
