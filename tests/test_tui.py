@@ -656,3 +656,75 @@ class TestTierPicker:
 
         scan_blocking(cfg, [2])
         assert seen["tiers"] == [2]
+
+
+class TestRolePage:
+    """The page advertises stage keys, so they have to work from inside it.
+
+    A ModalScreen's bindings shadow the app's: without its own, the page said
+    "press s" while s did nothing.
+    """
+
+    def test_the_page_binds_every_stage_key_it_advertises(self, cfg):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                keys = set(app.screen.active_bindings)
+                for key in ("s", "t", "o", "v", "w", "escape"):
+                    assert key in keys, f"the role page does not bind {key!r}"
+
+        asyncio.run(scenario())
+
+    def test_a_stage_key_on_the_page_runs_that_stage(self, cfg, monkeypatch):
+        import jobsearch.tui as tui_mod
+
+        calls = []
+        monkeypatch.setattr(
+            tui_mod, "run_stage_blocking",
+            lambda cfg, stage, job_id, **kw: calls.append(stage) or f"ran {stage}",
+        )
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                await pilot.press("s")
+                for _ in range(20):
+                    await pilot.pause()
+                    if calls:
+                        break
+                assert calls == ["score"], "pressing s on the page must score"
+
+        asyncio.run(scenario())
+
+    def test_markup_escapes_untrusted_text(self, cfg):
+        """Reasoning and drafts contain literal brackets; markup would eat them."""
+        from jobsearch.models import Contact, OutreachDraft
+        from jobsearch.tui import role_detail_markup
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_outreach(
+                OutreachDraft(
+                    job_id=job_id,
+                    contacts=[Contact(title="VP Eng", linkedin_search_url="https://x.test/1")],
+                    email_body="Hi [name], regards",
+                )
+            )
+        markup = role_detail_markup(cfg, job_id)
+        assert "\\[name]" in markup, "the placeholder must be escaped, not swallowed"
+
+    def test_it_renders_without_a_score(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        markup = role_detail_markup(cfg, seed(cfg))
+        assert "Not scored yet" in markup
+        assert "No contacts yet" in markup

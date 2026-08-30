@@ -105,7 +105,7 @@ behaviour cannot drift between the two.
 | `t` | Tailor a CV for it |
 | `o` | Draft outreach |
 | `v` | Run the ATS verifier on its CV |
-| `enter` | Open the role: constraints, per-dimension reasoning, notes, drafts |
+| `enter` | Open the role page: constraints, per-dimension reasoning, notes, drafts |
 | `w` | Open the posting in your browser |
 | `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
 | `n` | Add a role you found yourself; `ctrl+s` saves |
@@ -132,6 +132,11 @@ have applied to. The summary counts them, so you can see the filter working:
 `upsert_job` never clobbers the status of an existing job — so a dismissed role
 stays dismissed the next time `discover` sweeps its board. A deleted one comes
 straight back. Delete is there for genuine junk, and it asks first.
+
+The role page binds the stage keys too (`s` `t` `o` `v`), so you can score,
+tailor and draft without closing it — the page reprints itself when the stage
+finishes. A modal's bindings shadow the app's, so a page that advertises a key
+has to bind it itself.
 
 Stages run on a worker thread, so a long tailoring call does not freeze the
 table, and results stream into the log pane at the bottom. `--dry-run` works

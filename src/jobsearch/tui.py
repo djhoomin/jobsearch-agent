@@ -306,6 +306,103 @@ def outreach_detail_text(cfg: Config, job_id: str) -> str:
     return "\n".join(lines)
 
 
+def role_detail_markup(cfg: Config, job_id: str) -> str:
+    """The role page as Rich markup, with every dynamic value escaped.
+
+    Escaping matters: postings, model reasoning and drafts all contain literal
+    square brackets (``Hi [name],``) that markup would otherwise swallow. With
+    them escaped we can use markup for structure and colour safely.
+    """
+    import json
+
+    from rich.markup import escape
+
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        row = tracker.get_job(job_id)
+        contacts = tracker.contacts(job_id)
+        draft = tracker.latest_outreach(job_id)
+        score_json = row["score_json"]
+
+    def e(value: Any) -> str:
+        return escape(str(value or ""))
+
+    def rule(label: str) -> str:
+        return f"\n[bold]{label}[/]\n[dim]{'─' * 58}[/]"
+
+    out: list[str] = [
+        f"[b]{e(_get(row, 'company', ''))}[/]  [dim]—[/]  {e(_get(row, 'title', ''))}",
+        "",
+        f"[dim]status  [/] {e(_get(row, 'status', ''))}",
+        f"[dim]place   [/] {e(_get(row, 'location', '')) or '[dim]—[/]'}",
+        f"[dim]link    [/] {e(_get(row, 'url', '')) or '[dim]—[/]'}",
+    ]
+    cv = _get(row, "cv_pdf_path") or _get(row, "cv_html_path")
+    out.append(f"[dim]cv      [/] {e(cv)}" if cv else "[dim]cv       none yet — press t[/]")
+
+    if score_json:
+        data = json.loads(score_json)
+        out.append(rule("HARD CONSTRAINTS"))
+        for c in data.get("constraints", {}).get("results", []):
+            colour, mark = {
+                "pass": ("green", "ok "),
+                "fail": ("red", "FAIL"),
+                "unknown": ("yellow", " ? "),
+            }.get(c["verdict"], ("white", "   "))
+            out.append(f"  [{colour}]{mark}[/]  {e(c['name'])}: {e(c['reason'])}")
+
+        weighted = data.get("weighted")
+        rec = e(data.get("recommendation") or "—")
+        head = f"{weighted:.2f}" if weighted is not None else "—"
+        out.append(rule(f"SCORE {head}   ·   recommendation: {rec}"))
+        for dim in data.get("dimensions", []):
+            score = dim["score"]
+            colour = "green" if score >= 4 else "yellow" if score >= 3 else "red"
+            out.append(f"\n  [b]{e(dim['name'])}[/]  [{colour}]{score}/5[/]")
+            out.append(f"  [dim]{e(dim['reasoning'])}[/]")
+            for ev in dim.get("evidence", [])[:4]:
+                out.append(f"    [dim]·[/] {e(ev)}")
+
+        notes = (data.get("notes") or "").strip()
+        if notes:
+            out.append(rule("NOTES AND QUESTIONS"))
+            out.append(f"  [dim]{e(notes)}[/]")
+    else:
+        out.append(rule("SCORE"))
+        out.append("  [dim]Not scored yet — press [b]s[/b].[/]")
+
+    out.append(rule("OUTREACH"))
+    if contacts:
+        out.append(f"  [dim]{len(contacts)} likely contact(s) — open these searches yourself[/]")
+        for contact in contacts:
+            out.append(f"  [b]·[/] {e(_get(contact, 'name') or _get(contact, 'title', 'contact'))}")
+            url = _get(contact, "search_url")
+            if url:
+                out.append(f"    [dim]{e(url)}[/]")
+    else:
+        out.append("  [dim]No contacts yet — press [b]o[/b].[/]")
+
+    if draft:
+        for label, key in (
+            ("Connection note", "connection_note"),
+            ("LinkedIn message", "linkedin_message"),
+        ):
+            body = str(_get(draft, key, "")).strip()
+            if body:
+                out += ["", f"  [b]{label}[/]", f"  [dim]{e(body)}[/]"]
+        subject = str(_get(draft, "email_subject", "")).strip()
+        body = str(_get(draft, "email_body", "")).strip()
+        if subject or body:
+            out += ["", "  [b]Email[/]"]
+            if subject:
+                out.append(f"  [dim]Subject: {e(subject)}[/]")
+            if body:
+                out.append(f"  [dim]{e(body)}[/]")
+    return "\n".join(out)
+
+
 def role_detail_text(cfg: Config, job_id: str) -> str:
     """Everything known about one role, as plain text.
 
@@ -378,7 +475,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         Screen { layout: vertical; }
         #table { height: 1fr; min-height: 6; }
         #detail { height: auto; max-height: 16; border-top: solid $accent; padding: 0 1; }
-        #outreach { padding: 1 2; height: 1fr; }
+        #outreach { padding: 1 2; height: 1fr; background: $surface; }
+        #rolestatus { height: auto; padding: 1 2 0 2; background: $surface; }
         #picker { padding: 1 2; height: auto; background: $surface; border: solid $accent; }
         #newrole { padding: 1 2; height: 1fr; background: $surface; border: solid $accent; }
         #newrole Input { margin-bottom: 1; }
@@ -850,10 +948,18 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.dismiss(None)
 
     class RoleScreen(ModalScreen):  # type: ignore[misc]
-        """Everything known about one role: constraints, scoring, drafts."""
+        """Everything known about one role, and the stage keys that change it.
+
+        A modal's bindings shadow the app's, so without these the page would
+        say "press s" while s did nothing.
+        """
 
         BINDINGS = [
-            Binding("escape,q,enter", "dismiss_screen", "Back"),
+            Binding("escape,q", "dismiss_screen", "Back"),
+            Binding("s", "stage('score')", "Score"),
+            Binding("t", "stage('tailor')", "Tailor"),
+            Binding("o", "stage('outreach')", "Outreach"),
+            Binding("v", "stage('verify')", "Verify"),
             Binding("w", "open_url", "Open posting"),
         ]
 
@@ -861,12 +967,42 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             super().__init__()
             self.cfg = cfg
             self.job_id = job_id
+            self.busy = False
 
         def compose(self) -> ComposeResult:
+            yield Static("", id="rolestatus")
             with VerticalScroll(id="outreach"):
-                # markup=False: drafts contain literal [name] placeholders.
-                yield Static(role_detail_text(self.cfg, self.job_id), markup=False)
+                # Dynamic values are escaped by role_detail_markup, so markup
+                # is safe to leave on here.
+                yield Static(role_detail_markup(self.cfg, self.job_id), id="rolebody")
             yield Footer()
+
+        def refresh_body(self) -> None:
+            self.query_one("#rolebody", Static).update(
+                role_detail_markup(self.cfg, self.job_id)
+            )
+
+        def action_stage(self, stage: str) -> None:
+            if self.busy:
+                return
+            self.busy = True
+            self.query_one("#rolestatus", Static).update(f"  [yellow]running {stage}…[/]")
+            self.run_stage(stage)
+
+        @work(thread=True, exclusive=True)
+        def run_stage(self, stage: str) -> None:
+            try:
+                message = run_stage_blocking(self.cfg, stage, self.job_id, dry_run=dry_run)
+            except Exception as exc:  # noqa: BLE001 - shown on the page
+                message = f"[red]{type(exc).__name__}:[/] {exc}"
+            # call_from_thread lives on the App, not on a Screen.
+            self.app.call_from_thread(self.finish_stage, message)
+
+        def finish_stage(self, message: str) -> None:
+            self.busy = False
+            self.query_one("#rolestatus", Static).update(f"  {message}")
+            self.refresh_body()
+            self.app.action_refresh_rows()
 
         def action_dismiss_screen(self) -> None:
             self.dismiss()
