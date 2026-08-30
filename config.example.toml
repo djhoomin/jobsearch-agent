@@ -1,0 +1,206 @@
+# jobsearch-agent configuration.
+#
+# All relative paths are resolved against the directory holding THIS file.
+# Nothing in the code is hardcoded to a particular machine: point the [paths]
+# section at your own source documents and the tool follows.
+
+[paths]
+# Source documents (read-only; the tool never writes to these).
+dossier = "../career-dossier.md"
+base_cv = "../cv.html"
+search_strategy = "../search-strategy.md"
+target_companies = "../target-companies.md"
+# The user's existing tracker. Used ONLY to read the column shape.
+# Exports are written to output_dir, never over this file.
+tracker_xlsx = "../tracker.xlsx"
+# Everything the tool writes lives under here.
+output_dir = "output"
+db_path = "output/jobsearch.db"
+
+[claude]
+model = "claude-opus-5"
+# Non-streaming calls (scoring, grounding checks, outreach drafts).
+max_tokens = 16000
+# Streaming calls (full CV tailoring).
+streaming_max_tokens = 64000
+effort = "high"
+# Cache the dossier + base CV prefix. Verify with usage.cache_read_input_tokens.
+cache_ttl = "1h"
+
+[candidate]
+name = "Your Name"
+email = "you@example.com"
+location = "Your City, Country"
+linkedin = "https://www.linkedin.com/in/your-handle/"
+current_title = "Your Current Title"
+current_company = "Your Current Employer"
+
+# ---------------------------------------------------------------------------
+# Hard constraints. Applied as pass/fail filters BEFORE any scoring.
+# A filter returns PASS, FAIL or UNKNOWN; only a definite FAIL eliminates a role.
+# ---------------------------------------------------------------------------
+[constraints]
+# 1. Visa. Employer must be an IND recognised sponsor (or EOR-equivalent) for
+#    NL-based employment, and clear the HSM salary threshold.
+require_ind_sponsor = true
+# 2026 Highly Skilled Migrant gross-per-month thresholds (excl. 8% holiday
+# allowance). Re-check against the IND site; these change annually.
+hsm_threshold_monthly_eur_30plus = 5688
+hsm_threshold_monthly_eur_under30 = 4171
+candidate_is_30_plus = true  # affects which HSM threshold applies
+
+# 2. Non-compete. Competing employers are gated until the waiver is signed.
+#    Flip this to true the day it is signed and the gate disappears.
+non_compete_waiver_signed = false
+gaming_adjacent_keywords = [
+  "game studio", "video game", "gaming company", "game development",
+  "aaa studio", "mobile games", "game publisher",
+]
+
+# 3. Compensation floor: current base incl. holiday allowance.
+comp_floor_eur = 100000
+# Only fail on comp when the posting states a range whose TOP is below the floor.
+# A posting with no stated range is UNKNOWN, not a fail.
+comp_fail_on_unknown = false
+
+# 4. Location and travel.
+allowed_location_patterns = [
+  "amsterdam", "netherlands", "nl", "remote", "remote-eu", "remote europe",
+  "emea", "europe", "hybrid", "utrecht", "eindhoven", "rotterdam", "delft",
+  "den haag", "the hague", "haarlem", "anywhere in europe",
+]
+# Explicitly European anchors. ONLY these override a blocked location, so
+# "San Francisco or Remote (Europe)" survives while "Remote - United States"
+# does not. A bare "remote" is not an anchor: most remote roles are US-remote.
+eu_anchor_patterns = [
+  "amsterdam", "netherlands", "nederland", "utrecht", "eindhoven", "rotterdam",
+  "delft", "den haag", "the hague", "haarlem", "remote-eu", "remote eu",
+  "remote europe", "remote - europe", "europe", "european", "emea", "eu",
+  "cet", "cest", "anywhere in europe", "germany", "berlin", "munich", "france",
+  "paris", "spain", "portugal", "ireland", "dublin", "denmark", "copenhagen",
+  "sweden", "stockholm", "belgium", "brussels",
+]
+# A posting whose location matches one of these AND does not also match an
+# EU anchor above is a definite fail.
+blocked_location_patterns = [
+  "united states", "usa", "san francisco", "new york", "seattle", "austin",
+  "boston", "canada", "singapore", "tokyo", "sydney", "india", "bengaluru",
+  "onsite in london", "on-site in london",
+]
+# Travel cap is roughly monthly. Weekly-travel roles are out.
+travel_fail_patterns = [
+  "weekly travel", "travel weekly", "travel every week", "50% travel",
+  "50%+ travel", "60% travel", "70% travel", "75% travel", "80% travel",
+  "extensive travel", "frequent travel to the us", "constant travel",
+]
+travel_max_percent = 30
+
+# ---------------------------------------------------------------------------
+# Weighted scoring rubric (search-strategy.md). Weights must sum to 1.0.
+# ---------------------------------------------------------------------------
+[weights]
+buyer = 0.20
+role_fit = 0.25
+company = 0.25
+domain = 0.15
+talent = 0.15
+
+[scoring]
+# Roles scoring below this are not worth an application.
+shortlist_threshold = 3.5
+
+# ---------------------------------------------------------------------------
+# ATS verification of the rendered PDF.
+# ---------------------------------------------------------------------------
+[ats]
+max_pages = 2
+required_headings = [
+  "Professional Summary",
+  "Professional Experience",
+  "Skills",
+  "Education",
+]
+# Headings that should be present but are not fatal if renamed.
+optional_headings = ["Patents, Publications and Presentations"]
+# Keywords that must never break across a line wrap. The template wraps these
+# in <span class="nb"> (white-space: nowrap) to prevent it.
+nowrap_keywords = [
+  "human-in-the-loop",
+  "multi-agent",
+  "retrieval-augmented",
+  "on-device",
+  "end-to-end",
+  "go-to-market",
+  "cross-functional",
+  "research-to-product",
+  "stage-gated",
+]
+min_keyword_coverage = 0.5
+
+[render]
+# Verified working on macOS. Override for Chromium/Brave/another OS.
+chrome_binary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+chrome_args = ["--headless", "--disable-gpu", "--no-pdf-header-footer"]
+timeout_seconds = 120
+
+# ---------------------------------------------------------------------------
+# Discovery. LEGITIMATE PUBLIC APIs ONLY.
+# No LinkedIn, no Indeed, nothing whose ToS forbids automated access.
+# ---------------------------------------------------------------------------
+[discover]
+user_agent = "jobsearch-agent/0.1 (personal job search; +mailto:you@example.com)"
+rate_limit_seconds = 1.0
+timeout_seconds = 20
+respect_robots_txt = true
+# Title keywords used to pre-filter board results before anything is scored.
+title_include = [
+  "head of ai", "director of ai", "vp of ai", "vp ai", "director, ai",
+  "head of machine learning", "director of machine learning",
+  "head of applied ai", "director of applied ai", "applied ai lead",
+  "director of research", "head of research", "ai lead", "lead, ai",
+  "director of engineering, ai", "head of ai platform", "ai product",
+  "director of product", "head of product, ai",
+  "field cto", "vp solutions", "head of solutions engineering",
+  "director of solutions engineering", "forward deployed",
+  "deployment strategist", "solutions architect lead", "principal ai",
+]
+title_exclude = [
+  "intern", "internship", "student", "graduate", "junior",
+  "sales development", "account executive", "recruiter",
+]
+
+# ---------------------------------------------------------------------------
+# Target company -> ATS board mapping. Extend freely; this is the file the user
+# owns. `ats` is one of: greenhouse | lever | ashby | json_feed.
+# `token` is the board slug in the public API URL.
+# `ind_sponsor` is true / false / "unknown" and feeds the visa hard constraint.
+# `gaming` marks employers gated by the non-compete until the waiver is signed.
+#
+# The three below are illustrative. Firms migrate between ATS vendors, so
+# re-verify with `jobsearch doctor --boards` when one starts 404ing.
+# ---------------------------------------------------------------------------
+
+[[discover.boards]]
+company = "Weaviate"
+ats = "ashby"
+token = "weaviate"
+tier = 1
+ind_sponsor = true
+
+[[discover.boards]]
+company = "Example Greenhouse Co"
+ats = "greenhouse"
+token = "examplecompany"
+tier = 1
+ind_sponsor = "unknown"
+
+[[discover.boards]]
+company = "Example Lever Co"
+ats = "lever"
+token = "examplecompany"
+tier = 2
+ind_sponsor = "unknown"
+gaming = false           # true gates it behind the non-compete waiver
+
+# ... add your own targets here. `jobsearch doctor --boards` verifies every
+# token against its live API and tells you which ones 404.

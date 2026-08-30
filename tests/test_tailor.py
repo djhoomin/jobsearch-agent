@@ -1,0 +1,209 @@
+"""Tailoring: HTML hardening, grounding audit, and the prompt-cache layout.
+
+The generation call itself is mocked - these tests pin the deterministic parts
+around it, which are the parts that keep a fabricated claim from shipping.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from jobsearch.models import Claim, TailorResult
+from jobsearch.tailor import (
+    extract_headline,
+    format_claim_report,
+    ground_claims,
+    harden_html,
+    html_to_text,
+    output_stem,
+    strip_code_fences,
+    tailor_cv,
+)
+
+
+class TestCodeFences:
+    def test_strips_a_fenced_block(self):
+        assert strip_code_fences("```html\n<p>hi</p>\n```") == "<p>hi</p>"
+
+    def test_leaves_plain_html_alone(self):
+        assert strip_code_fences("<p>hi</p>") == "<p>hi</p>"
+
+
+class TestHarden:
+    def test_injects_the_missing_nowrap_rule(self, base_cv_html):
+        stripped = base_cv_html.replace("  .nb { white-space: nowrap; }\n", "")
+        assert ".nb { white-space: nowrap" not in stripped
+        hardened, notes = harden_html(stripped)
+        assert ".nb { white-space: nowrap" in hardened
+        assert any("injected" in n for n in notes)
+
+    def test_leaves_a_correct_stylesheet_untouched(self, base_cv_html):
+        hardened, notes = harden_html(base_cv_html)
+        assert hardened == base_cv_html
+        assert notes == []
+
+    def test_flags_reintroduced_small_caps(self):
+        html = "<style>h2 { font-variant: small-caps; }\n.nb { white-space: nowrap; }</style>"
+        _, notes = harden_html(html)
+        assert any("small-caps" in n for n in notes)
+
+    def test_flags_reintroduced_letter_spacing(self):
+        html = "<style>h2 { letter-spacing: 2.4pt; }\n.nb { white-space: nowrap; }</style>"
+        _, notes = harden_html(html)
+        assert any("letter-spacing" in n for n in notes)
+
+    def test_flags_absolutely_positioned_bullets(self):
+        html = (
+            "<style>li::before { content: '•'; position: absolute; }\n"
+            ".nb { white-space: nowrap; }</style>"
+        )
+        _, notes = harden_html(html)
+        assert any("bullet" in n for n in notes)
+
+    def test_injection_works_without_a_style_block(self):
+        hardened, _ = harden_html("<p>no styles here</p>")
+        assert "white-space: nowrap" in hardened
+
+
+class TestHelpers:
+    def test_extracts_the_headline(self, base_cv_html):
+        assert extract_headline(base_cv_html).startswith("Head of AI")
+
+    def test_html_to_text_drops_markup(self, base_cv_html):
+        text = html_to_text(base_cv_html)
+        assert "<div" not in text
+        assert "Professional Summary" in text
+
+    def test_output_stem_is_filesystem_safe(self):
+        from jobsearch.models import JobPosting
+
+        posting = JobPosting(company="Dash0 / Acme, Inc.", title="Director", url="https://x")
+        assert output_stem(posting) == "DJ_Human_CV_Dash0AcmeInc"
+
+
+class TestTailorStage:
+    """The stage function, with generation and grounding both mocked."""
+
+    @pytest.fixture
+    def wired(self, fake_claude, base_cv_html):
+        fake_claude.stream_response = base_cv_html
+        fake_claude.structured_responses["ground"] = {
+            "claims": [
+                {
+                    "text": "Director of Research since May 2024",
+                    "grounded": True,
+                    "evidence": "Director of Engineering at Northwind Labs since May 2024",
+                    "source": "dossier",
+                    "severity": "info",
+                },
+                {
+                    "text": "Managed a budget of EUR 4 million",
+                    "grounded": False,
+                    "evidence": "",
+                    "source": "none",
+                    "severity": "block",
+                },
+            ],
+            "verdict": "review",
+            "summary": "one invented figure",
+        }
+        return fake_claude
+
+    def test_writes_html_and_reports_ungrounded_claims(self, cfg, wired, posting):
+        result = tailor_cv(posting, cfg, wired, render=False)
+        assert result.html_path.endswith("DJ_Human_CV_Weaviate.html")
+        assert len(result.claims) == 2
+        assert len(result.ungrounded) == 1
+        assert result.ungrounded[0].severity == "block"
+
+    def test_the_generated_file_lands_in_the_output_dir(self, cfg, wired, posting):
+        result = tailor_cv(posting, cfg, wired, render=False)
+        from pathlib import Path
+
+        assert Path(result.html_path).is_file()
+        assert cfg.output_dir in Path(result.html_path).parents
+
+    def test_never_writes_outside_the_output_dir(self, cfg, wired, posting):
+        """The user's real source documents must be untouched by tailoring."""
+        before = cfg.base_cv.read_text(encoding="utf-8")
+        tailor_cv(posting, cfg, wired, render=False)
+        assert cfg.base_cv.read_text(encoding="utf-8") == before
+
+    def test_grounding_can_be_skipped(self, cfg, wired, posting):
+        result = tailor_cv(posting, cfg, wired, render=False, verify_claims=False)
+        assert result.claims == []
+
+    def test_cacheable_prefix_precedes_the_job_content(self, cfg, wired, posting):
+        tailor_cv(posting, cfg, wired, render=False)
+        generation = next(c for c in wired.calls if c["kind"] == "stream")
+        labels = [label for label, _ in generation["stable_context"]]
+        assert labels == ["career_dossier", "base_cv_html", "search_strategy"]
+        assert "Director of Product" not in "".join(
+            text for _, text in generation["stable_context"]
+        )
+        assert "Director of Product" in generation["user_content"]
+
+    def test_grounding_reuses_the_same_prefix(self, cfg, wired, posting):
+        """Same prefix, same order: otherwise the second call misses the cache."""
+        tailor_cv(posting, cfg, wired, render=False)
+        stream = next(c for c in wired.calls if c["kind"] == "stream")
+        ground = next(c for c in wired.calls if c["stage"] == "ground")
+        assert stream["stable_context"] == ground["stable_context"]
+
+    def test_reports_cache_usage(self, cfg, wired, posting):
+        result = tailor_cv(posting, cfg, wired, render=False)
+        assert result.cache_read_tokens == 9000
+
+    def test_non_html_output_is_rejected(self, cfg, fake_claude, posting):
+        fake_claude.stream_response = "I'm sorry, I can't help with that."
+        with pytest.raises(RuntimeError, match="not an HTML CV"):
+            tailor_cv(posting, cfg, fake_claude, render=False, verify_claims=False)
+
+
+class TestGroundClaims:
+    def test_parses_the_audit_payload(self, cfg, fake_claude, posting, base_cv_html):
+        fake_claude.structured_responses["ground"] = {
+            "claims": [
+                {"text": "a", "grounded": True, "evidence": "e", "source": "dossier",
+                 "severity": "info"},
+                {"text": "b", "grounded": False, "evidence": "", "source": "none",
+                 "severity": "warn"},
+            ],
+            "verdict": "review",
+            "summary": "",
+        }
+        claims = ground_claims(base_cv_html, posting, cfg, fake_claude)
+        assert [c.grounded for c in claims] == [True, False]
+        assert claims[1].severity == "warn"
+
+    def test_the_audit_sees_flattened_cv_text(self, cfg, fake_claude, posting, base_cv_html):
+        fake_claude.structured_responses["ground"] = {"claims": [], "verdict": "clean", "summary": ""}
+        ground_claims(base_cv_html, posting, cfg, fake_claude)
+        content = fake_claude.calls[-1]["user_content"]
+        assert "<style>" not in content
+        assert "Professional Summary" in content
+
+
+class TestClaimReport:
+    def test_clean_result_says_so(self):
+        result = TailorResult(
+            job_id="x",
+            html_path="x.html",
+            claims=[Claim(text="a", grounded=True, evidence="e")],
+        )
+        assert "traces back" in format_claim_report(result)
+
+    def test_ungrounded_claims_are_printed_in_full(self):
+        result = TailorResult(
+            job_id="x",
+            html_path="x.html",
+            claims=[Claim(text="Managed EUR 4M", grounded=False, severity="block")],
+        )
+        report = format_claim_report(result)
+        assert "UNGROUNDED" in report
+        assert "Managed EUR 4M" in report
+        assert "BLOCK" in report
+
+    def test_no_audit_is_reported_honestly(self):
+        report = format_claim_report(TailorResult(job_id="x", html_path="x.html"))
+        assert "no grounding audit" in report

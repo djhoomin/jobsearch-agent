@@ -1,0 +1,68 @@
+<!-- DELIBERATELY BROKEN fixture CV. Each defect below is one the real CV actually
+     had, and each must be caught by the ATS verifier. Rendering this to PDF must
+     FAIL. Do not "fix" this file. -->
+<meta charset="utf-8">
+<title>Jane Q. Testcandidate - Curriculum Vitae</title>
+<style>
+  @page { size: A4; margin: 13mm 15mm 13mm 15mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 9.5pt; line-height: 1.35; }
+  .head { display: flex; justify-content: space-between; }
+  h1 { font-family: Georgia, serif; font-size: 20pt; font-weight: 700; }
+  .subtitle { font-size: 10pt; font-weight: 600; }
+  /* DEFECT 1: letter-spacing plus small-caps on h2. Chrome emits these as
+     individually positioned glyphs; extraction injects stray spaces and the
+     parser stops matching the standard section names. */
+  h2 { font-family: Georgia, serif; font-size: 10.8pt; font-variant: small-caps; letter-spacing: 2.4pt; border-bottom: 0.7pt solid #444; margin: 7pt 0 3.5pt 0; }
+  /* DEFECT 2: absolutely positioned bullet marker. Extraction orphans every
+     marker onto its own line, leaving a column of dots. */
+  ul { list-style: none; }
+  li { position: relative; padding-left: 12pt; margin-bottom: 1.6pt; }
+  li::before { content: "\2022"; position: absolute; left: 0; top: 0; color: #555; }
+  .entry { margin-bottom: 4pt; }
+  .row { display: flex; justify-content: space-between; }
+  .org { font-weight: 700; }
+  .dates { font-style: italic; font-size: 8.6pt; }
+  /* DEFECT 3: education dates in a right-aligned flex column. Extraction
+     reorders the columns and detaches every date from its degree. */
+  .edu .erow { display: flex; justify-content: space-between; }
+  .edu .erow .datecol { text-align: right; min-width: 110pt; }
+  /* DEFECT 4: no .nb rule, so hyphenated keywords break across line wraps.
+     The narrow column below forces the break to land inside one. */
+  .narrow { width: 24mm; }
+</style>
+
+<div class="head">
+  <div>
+    <h1>Jane Q. Testcandidate</h1>
+    <div class="subtitle">Head of AI</div>
+  </div>
+  <div class="contact">Amsterdam, Netherlands</div>
+</div>
+
+<h2>Professional Summary</h2>
+<p class="narrow">AI research and product leader with a decade across enterprise AI, running evaluation, governance and human-in-the-loop review of model output, multi-agent orchestration, retrieval-augmented generation and on-device inference in production.</p>
+
+<h2>Professional Experience</h2>
+
+<div class="entry">
+  <div class="row"><span class="org">Example Labs</span><span>Amsterdam, Netherlands</span></div>
+  <div class="row"><span>Director of Research</span><span class="dates">May 2024 - Present</span></div>
+  <ul>
+    <li>Own the research-to-product portfolio: a stage-gated pipeline with explicit build, partner and kill decisions across ten concurrent bets</li>
+    <li>Took the flagship platform from zero to market-fit with paying customers in two years</li>
+    <li>Built the evaluation stack behind the platform, covering scoring, regression tests and human-in-the-loop review of every generated artefact before release</li>
+  </ul>
+</div>
+
+<h2>Skills</h2>
+<ul>
+  <li>Generative AI | Large Language Models | Multi-Agent Systems | Knowledge Graphs</li>
+  <li>Python | Rust | TypeScript | SQL | MLOps</li>
+</ul>
+
+<h2>Education</h2>
+<div class="edu">
+  <div class="erow"><span class="org">Example University</span><span class="datecol dates">Mar 2016 - Sep 2019</span></div>
+  <div class="erow"><span class="org">Example University</span><span class="datecol dates">Feb 2011 - Nov 2013</span></div>
+</div>

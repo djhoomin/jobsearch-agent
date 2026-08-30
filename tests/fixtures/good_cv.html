@@ -1,0 +1,89 @@
+<!-- ATS-hardened fixture CV. Structurally identical to the real base CV but with
+     synthetic content, so no personal data lives in the test suite.
+     Rendering this to PDF must PASS every ATS check. -->
+<meta charset="utf-8">
+<title>Jane Q. Testcandidate - Curriculum Vitae</title>
+<style>
+  @page { size: A4; margin: 13mm 15mm 13mm 15mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 9.5pt; line-height: 1.35; color: #1a1a1a; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4pt; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 20pt; font-weight: 700; }
+  .subtitle { font-size: 10pt; font-weight: 600; color: #333; margin-top: 1pt; }
+  .contact { text-align: right; font-size: 8.4pt; color: #333; }
+  /* ATS: no small-caps or letter-spacing on headings - both corrupt PDF text
+     extraction and can stop parsers matching standard section names. */
+  h2 { font-family: Georgia, serif; font-size: 10.8pt; font-variant: normal; letter-spacing: 0; border-bottom: 0.7pt solid #444; padding-bottom: 1.5pt; margin: 7pt 0 3.5pt 0; }
+  ul { list-style: none; }
+  /* ATS: bullet is inline (not an absolutely-positioned pseudo-element) so PDF text
+     extraction keeps each marker attached to its own line instead of orphaning it. */
+  li { padding-left: 9pt; text-indent: -8pt; margin-bottom: 1.6pt; text-align: left; }
+  li::before { content: "\2022\00a0\00a0"; color: #555; }
+  .entry { margin-bottom: 4pt; break-inside: avoid; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .org { font-weight: 700; font-size: 9.6pt; }
+  .loc { font-size: 8.6pt; color: #444; }
+  .role { font-style: italic; font-size: 9.2pt; }
+  .dates { font-style: italic; font-size: 8.6pt; color: #444; }
+  .r { font-weight: 700; }
+  /* ATS: education dates are inline, not a right-aligned flex column - the column
+     form makes extractors detach every date from its degree. */
+  .edu .erow { margin-bottom: 1.6pt; }
+  /* ATS: hyphenated keywords must not break across a line, or a literal
+     match like "human-in-the-loop" is lost at the wrap point. */
+  .nb { white-space: nowrap; }
+  .kw { font-weight: 600; }
+</style>
+
+<div class="head">
+  <div>
+    <h1>Jane Q. Testcandidate</h1>
+    <div class="subtitle">Head of AI | Director of AI Research &amp; Product</div>
+  </div>
+  <div class="contact">
+    Email: jane@example.invalid<br>
+    Location: Amsterdam, Netherlands
+  </div>
+</div>
+
+<h2>Professional Summary</h2>
+<p class="summary">AI research and product leader with a decade across the buyer, vendor and builder sides of enterprise AI. Built a research portfolio with explicit stage gates and honest kill decisions, and still ships production code in Python and Rust. Experienced with <span class="nb">human-in-the-loop</span> review and <span class="nb">multi-agent</span> orchestration in production.</p>
+
+<h2>Professional Experience</h2>
+
+<div class="entry">
+  <div class="row"><span class="org">Example Labs</span><span class="loc">Amsterdam, Netherlands</span></div>
+  <div class="row"><span class="role">Director of Research</span><span class="dates">May 2024 - Present</span></div>
+  <ul>
+    <li>Own the research-to-product portfolio: a stage-gated pipeline with explicit build, partner and kill decisions across ten concurrent bets</li>
+    <li><span class="r">Result:</span> Took the flagship platform from zero to market-fit with paying customers in two years</li>
+    <li><span class="r">Result:</span> Built the evaluation stack behind the platform, including <span class="nb">multi-agent</span> orchestration and <span class="nb">human-in-the-loop</span> review of generated output</li>
+  </ul>
+</div>
+
+<div class="entry">
+  <div class="row"><span class="org">Example Platform Co</span><span class="loc">Amsterdam, Netherlands</span></div>
+  <div class="row"><span class="role">Director of Data Science</span><span class="dates">Oct 2022 - May 2024</span></div>
+  <ul>
+    <li>One of two worldwide leads building out the customer success data science team while remaining an individual contributor</li>
+    <li><span class="r">Result:</span> Reduced a customer's forecasting error by 50%, worth a measured six million in labour costs</li>
+  </ul>
+</div>
+
+<h2>Skills</h2>
+<ul class="skills">
+  <li><span class="kw">Artificial Intelligence and Machine Learning:</span> Generative AI | Large Language Models (LLMs) | <span class="nb">Retrieval-Augmented Generation (RAG)</span> | <span class="nb">Multi-Agent Systems</span> | Model Evaluation | Knowledge Graphs | <span class="nb">On-Device Inference</span></li>
+  <li><span class="kw">Engineering and Data:</span> Python | Rust | TypeScript | SQL | MLOps | Docker | Kubernetes</li>
+  <li><span class="kw">Leadership and Product:</span> AI Strategy | <span class="nb">R&amp;D Portfolio Management</span> | <span class="nb">Cross-Functional Leadership</span> | Team Building</li>
+</ul>
+
+<h2>Education</h2>
+<div class="edu">
+  <div class="erow"><span class="org" style="font-size:9.2pt">Example University</span> &middot; Masters degree: Operations Research, <i>Cum Laude</i> &middot; <span class="dates">Mar 2016 - Sep 2019</span></div>
+  <div class="erow"><span class="org" style="font-size:9.2pt">Example University</span> &middot; BSc: Mathematical Sciences &middot; <span class="dates">Feb 2011 - Nov 2013</span></div>
+</div>
+
+<h2>Patents, Publications and Presentations</h2>
+<ul class="pub">
+  <li><span class="kw">Patent (inventor):</span> A Method for Creating Specialized Language Models &middot; application XX/0000/00000</li>
+</ul>
