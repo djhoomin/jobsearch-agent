@@ -1067,3 +1067,56 @@ class TestCopy:
                 assert key in set(app.screen.active_bindings)
 
         asyncio.run(scenario())
+
+
+class TestProviderInSettingsScreen:
+    def test_the_screen_exposes_the_provider_fields(self, cfg):
+        from textual.widgets import Input
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press(",")
+                await pilot.pause()
+                for key in ("provider", "model", "base_url", "api_key_env"):
+                    assert app.screen.query_one(f"#set-{key}", Input) is not None
+
+        asyncio.run(scenario())
+
+    def test_switching_provider_without_a_base_url_does_not_write(self, cfg):
+        from textual.widgets import Input
+
+        before = cfg.source.read_text(encoding="utf-8")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press(",")
+                await pilot.pause()
+                app.screen.query_one("#set-provider", Input).value = "openai_compatible"
+                app.screen.query_one("#set-base_url", Input).value = ""
+                app.screen.action_save()
+                await pilot.pause()
+                assert len(app.screen_stack) == 2, "the screen stays open on error"
+                assert cfg.source.read_text(encoding="utf-8") == before
+
+        asyncio.run(scenario())
+
+    def test_switching_provider_persists_and_reloads(self, cfg):
+        from textual.widgets import Input
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press(",")
+                await pilot.pause()
+                app.screen.query_one("#set-provider", Input).value = "openai_compatible"
+                app.screen.query_one("#set-base_url", Input).value = "https://openrouter.ai/api/v1"
+                app.screen.action_save()
+                await pilot.pause()
+                assert app.cfg.raw["claude"]["provider"] == "openai_compatible"
+
+        asyncio.run(scenario())

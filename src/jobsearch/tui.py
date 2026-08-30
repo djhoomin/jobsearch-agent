@@ -1020,12 +1020,30 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                     "[dim]Lists are comma separated. Judgement lives in the "
                     "strategy doc, which the scorer reads directly.[/]"
                 )
+                last_section = None
                 for spec in SETTINGS:
+                    if spec.section != last_section:
+                        last_section = spec.section
+                        heading = {
+                            "discover": "What to look for",
+                            "constraints": "Hard constraints",
+                            "scoring": "Scoring",
+                            "claude": "Model and provider",
+                        }.get(spec.section, spec.section)
+                        yield Static(f"\n[b]— {heading} —[/]")
+                        if spec.section == "claude":
+                            yield Static(
+                                "[dim]anthropic keeps prompt caching, which usually "
+                                "dominates cost. openai_compatible needs a Base URL "
+                                "and pip install -e '.[openai]'.[/]"
+                            )
                     value = values.get(spec.key)
                     shown = ", ".join(value) if isinstance(value, list) else str(
-                        "true" if value is True else "false" if value is False else value
+                        "true" if value is True else "false" if value is False else
+                        "" if value is None else value
                     )
-                    yield Static(f"\n[b]{spec.label}[/]  [dim]{spec.help}[/]")
+                    hint = f"  [dim]{'|'.join(spec.choices)}[/]" if spec.choices else ""
+                    yield Static(f"\n[b]{spec.label}[/]{hint}  [dim]{spec.help}[/]")
                     yield Input(value=shown, id=f"set-{spec.key}")
                 yield Static("\n[b]Rubric weights[/]  [dim]must sum to 1.0[/]")
                 for key in WEIGHT_KEYS:

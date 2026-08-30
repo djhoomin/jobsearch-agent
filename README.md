@@ -124,7 +124,7 @@ behaviour cannot drift between the two.
 | `x` | Delete permanently (asks first) |
 | `h` | Show dismissed roles again |
 | `/` | Filter by company or title (`esc` clears) |
-| `,` | Settings: title filters, constraints, rubric weights |
+| `,` | Settings: title filters, constraints, rubric weights, model and provider |
 | `r` | Reload from the tracker |
 | `q` | Quit |
 

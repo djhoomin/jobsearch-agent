@@ -130,3 +130,36 @@ class TestApplyEdits:
         assert values["comp_floor_eur"] == 100000
         assert isinstance(values["title_include"], list)
         assert values["weight_role_fit"] == 0.25
+
+
+class TestProviderSettings:
+    def test_provider_is_inserted_when_the_file_lacks_it(self):
+        """A config written before the setting existed has no line to replace."""
+        import tomllib
+
+        text = "[claude]\nmodel = \"claude-opus-5\"\n"
+        out = apply_edits(text, {"provider": "anthropic"})
+        assert tomllib.loads(out)["claude"]["provider"] == "anthropic"
+
+    def test_an_existing_provider_line_is_replaced_not_duplicated(self):
+        import tomllib
+
+        text = '[claude]\nprovider = "anthropic"\nmodel = "x"\n'
+        out = apply_edits(text, {"provider": "openai_compatible", "base_url": "http://x"})
+        assert out.count("provider =") == 1
+        assert tomllib.loads(out)["claude"]["provider"] == "openai_compatible"
+
+    def test_an_unknown_provider_is_refused(self):
+        with pytest.raises(SettingsError, match="must be one of"):
+            apply_edits(TEMPLATE, {"provider": "carrier pigeon"})
+
+    def test_openai_compatible_requires_a_base_url(self):
+        with pytest.raises(SettingsError, match="needs a Base URL"):
+            apply_edits(TEMPLATE, {"provider": "openai_compatible", "base_url": "  "})
+
+    def test_anthropic_does_not_require_a_base_url(self):
+        apply_edits(TEMPLATE, {"provider": "anthropic", "base_url": ""})
+
+    def test_a_missing_section_is_a_clear_error(self):
+        with pytest.raises(SettingsError, match=r"no \[claude\] section"):
+            apply_edits("[other]\nx = 1\n", {"provider": "anthropic"})

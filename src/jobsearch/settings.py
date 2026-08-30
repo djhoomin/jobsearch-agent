@@ -24,6 +24,7 @@ __all__ = [
     "apply_edits",
     "current_values",
     "set_array",
+    "set_or_insert_scalar",
     "set_scalar",
     "validate",
 ]
@@ -40,8 +41,12 @@ class SettingSpec:
     key: str
     section: str
     label: str
-    kind: str  # "int" | "float" | "bool" | "list"
+    kind: str  # "int" | "float" | "bool" | "list" | "str" | "choice"
     help: str = ""
+    #: For kind == "choice": the permitted values.
+    choices: tuple[str, ...] = ()
+    #: Insert the key under this section when the config file lacks it.
+    insert_if_missing: bool = False
 
     @property
     def is_list(self) -> bool:
@@ -81,6 +86,28 @@ SETTINGS: tuple[SettingSpec, ...] = (
         "shortlist_threshold", "scoring", "Shortlist threshold", "float",
         "Roles scoring below this are not worth an application.",
     ),
+    SettingSpec(
+        "provider", "claude", "Provider", "choice",
+        "anthropic uses the native SDK with prompt caching; openai_compatible "
+        "speaks chat-completions to any OpenAI-shaped endpoint.",
+        choices=("anthropic", "openai_compatible"),
+        insert_if_missing=True,
+    ),
+    SettingSpec(
+        "model", "claude", "Model", "str",
+        "Model id. For openai_compatible, whatever the endpoint calls it.",
+        insert_if_missing=True,
+    ),
+    SettingSpec(
+        "base_url", "claude", "Base URL", "str",
+        "openai_compatible only, e.g. https://openrouter.ai/api/v1",
+        insert_if_missing=True,
+    ),
+    SettingSpec(
+        "api_key_env", "claude", "API key variable", "str",
+        "openai_compatible only: the environment variable holding the key.",
+        insert_if_missing=True,
+    ),
 )
 
 WEIGHT_KEYS: tuple[str, ...] = ("buyer", "role_fit", "company", "domain", "talent")
@@ -105,11 +132,21 @@ _PARSERS: dict[str, Callable[[str], Any]] = {
     "int": lambda v: int(str(v).replace(",", "").replace("_", "").strip()),
     "float": lambda v: float(str(v).strip()),
     "bool": lambda v: str(v).strip().lower() in {"true", "yes", "y", "1", "on"},
+    "str": lambda v: str(v).strip(),
 }
 
 
 def validate(spec: SettingSpec, value: Any) -> Any:
     """Coerce a form value to the spec's type, or raise SettingsError."""
+    if spec.kind == "choice":
+        value = str(value).strip().lower()
+        if value not in spec.choices:
+            raise SettingsError(
+                f"{spec.label}: must be one of {', '.join(spec.choices)}, got {value!r}"
+            )
+        return value
+    if spec.kind == "str":
+        return str(value).strip()
     if spec.is_list:
         if isinstance(value, str):
             value = [v.strip() for v in value.split(",")]
@@ -191,6 +228,23 @@ def set_array(text: str, key: str, values: Sequence[str]) -> str:
     return text[: start.start()] + rendered + text[index + 1 :]
 
 
+def set_or_insert_scalar(text: str, section: str, key: str, value: Any) -> str:
+    """Set ``key``, adding it under ``[section]`` when the file lacks it.
+
+    A config written before a setting existed has no line to replace, and
+    failing on that would make the setting uneditable from the UI.
+    """
+    try:
+        return set_scalar(text, key, value)
+    except SettingsError:
+        pass
+    header = re.search(rf"^\[{re.escape(section)}\]\s*$", text, re.MULTILINE)
+    if not header:
+        raise SettingsError(f"no [{section}] section in the config file")
+    insert_at = header.end()
+    return text[:insert_at] + f"\n{key} = {_toml_value(value)}" + text[insert_at:]
+
+
 def apply_edits(
     text: str,
     edits: dict[str, Any],
@@ -203,7 +257,20 @@ def apply_edits(
         if spec is None:
             raise SettingsError(f"unknown setting: {key}")
         checked = validate(spec, value)
-        text = set_array(text, key, checked) if spec.is_list else set_scalar(text, key, checked)
+        if spec.is_list:
+            text = set_array(text, key, checked)
+        elif spec.insert_if_missing:
+            text = set_or_insert_scalar(text, spec.section, key, checked)
+        else:
+            text = set_scalar(text, key, checked)
+    if str(edits.get("provider", "")).strip().lower() == "openai_compatible" and not str(
+        edits.get("base_url", "")
+    ).strip():
+        raise SettingsError(
+            'provider "openai_compatible" needs a Base URL, '
+            "e.g. https://openrouter.ai/api/v1"
+        )
+
     if weights:
         for key, value in validate_weights(weights).items():
             text = set_scalar(text, key, value)
