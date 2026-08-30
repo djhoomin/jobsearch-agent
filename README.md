@@ -173,6 +173,10 @@ it is. For ad-hoc selection, most terminals bypass mouse capture with a
 modifier held down while dragging (Option in iTerm2, Fn in Terminal.app,
 Shift in most Linux terminals).
 
+**House style.** Generated CVs and letters never use em or en dashes. The
+prompts say so and the hardening step enforces it, because asking a model not
+to reach for an em dash does not reliably stop it.
+
 **Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
 `upsert_job` never clobbers the status of an existing job — so a dismissed role
 stays dismissed the next time `discover` sweeps its board. A deleted one comes

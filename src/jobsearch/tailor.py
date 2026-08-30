@@ -84,6 +84,11 @@ disqualifying. Some of his strongest material is confidential: respect the
 dossier's red-list guardrails (no revenue figures, no named pipeline companies,
 the semiconductor partner stays anonymous, no compensation specifics).
 
+## House style
+
+Never use an em dash (-) or an en dash (-). Use a plain hyphen, a comma, or
+two sentences. This is not negotiable: the candidate does not write that way.
+
 ## What to tailor
 
 1. `.subtitle` headline: the posting's EXACT job title, optionally with one
@@ -230,6 +235,27 @@ def repair_ats_html(html: str) -> tuple[str, list[str]]:
     return html, notes
 
 
+DASHES: tuple[tuple[str, str], ...] = (
+    ("&mdash;", "-"),
+    ("&ndash;", "-"),
+    ("\u2014", "-"),   # em dash
+    ("\u2013", "-"),   # en dash
+)
+
+
+def normalise_dashes(text: str) -> str:
+    """Replace em and en dashes with a plain hyphen.
+
+    A house-style rule, applied mechanically because asking the model not to
+    reach for an em dash does not reliably stop it. Spacing is preserved, so
+    "a - b" stays spaced and "well-known" stays closed up; the middot used as a
+    separator in the CV template is left alone.
+    """
+    for needle, replacement in DASHES:
+        text = text.replace(needle, replacement)
+    return re.sub(r" +- +", " - ", text)
+
+
 def protect_keywords(html: str, keywords: Sequence[str]) -> tuple[str, int]:
     """Wrap protected keywords in ``<span class="nb">`` so they cannot wrap.
 
@@ -282,6 +308,11 @@ def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, li
         if not re.search(pattern, html, re.IGNORECASE | re.DOTALL):
             html = _inject_css(html, snippet)
             notes.append("injected missing .nb { white-space: nowrap } rule")
+
+    dashed = normalise_dashes(html)
+    if dashed != html:
+        notes.append("replaced em and en dashes with hyphens")
+        html = dashed
 
     html, repairs = repair_ats_html(html)
     notes.extend(repairs)

@@ -104,3 +104,25 @@ class TestWriteLetter:
         monkeypatch.setattr(letter_mod, "ground_claims", lambda *a, **k: [])
         write_letter(posting(), cfg, client, instruction="lead on the FDE angle")
         assert "lead on the FDE angle" in seen["user_content"]
+
+
+class TestLetterHouseStyle:
+    def test_em_dashes_never_reach_the_letter(self, cfg, monkeypatch):
+        from jobsearch.claude import ClaudeClient
+        import jobsearch.letter as letter_mod
+
+        client = ClaudeClient()
+        monkeypatch.setattr(
+            type(client), "stream_text",
+            lambda self, **kw: "Hello,\n\nI led a team — and shipped.\n\nBest,\nDJ\n",
+        )
+        monkeypatch.setattr(letter_mod, "ground_claims", lambda *a, **k: [])
+        result = write_letter(posting(), cfg, client)
+        assert "—" not in result.text
+        assert "team - and shipped" in result.text
+
+    def test_the_instructions_forbid_them_too(self):
+        """Post-processing is the backstop; the prompt is the first line."""
+        from jobsearch.letter import LETTER_INSTRUCTIONS
+
+        assert "em dash" in LETTER_INSTRUCTIONS.lower()

@@ -18,7 +18,7 @@ from pathlib import Path
 from .claude import ClaudeClient, stable_context_for
 from .config import Config
 from .models import Claim, JobPosting
-from .tailor import ground_claims
+from .tailor import ground_claims, normalise_dashes
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,8 @@ semiconductor partner stays anonymous, no compensation specifics.
 ## Register
 
 Plain, direct, first person. No superlatives about yourself, no "passionate",
-no "thrilled", no "leverage" as a verb, no three-adjective strings. Write the
+no "thrilled", no "leverage" as a verb, no three-adjective strings. Never an em dash or an
+en dash - use a plain hyphen, a comma, or two sentences. Write the
 way a competent person emails a peer. Contractions are fine.
 
 If the posting names a hiring manager, address them. Otherwise use a plain
@@ -104,6 +105,7 @@ def strip_stray_markdown(text: str) -> str:
     if cleaned.strip().startswith("```"):
         cleaned = re.sub(r"^```[a-zA-Z]*\s*\n", "", cleaned.strip())
         cleaned = re.sub(r"\n```\s*$", "", cleaned)
+    cleaned = normalise_dashes(cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip() + "\n"
 
 

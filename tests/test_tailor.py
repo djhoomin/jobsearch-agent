@@ -389,3 +389,53 @@ class TestRepairAtsHtml:
         _, notes = harden_html(self.OLD, [])
         assert any(n.startswith("repaired:") for n in notes)
         assert not any("still contains an ATS hazard" in n for n in notes)
+
+
+class TestNormaliseDashes:
+    """House style: no em or en dashes. Asking the model does not reliably
+    stop it, so the rule is applied mechanically as well.
+    """
+
+    def test_a_spaced_em_dash_becomes_a_spaced_hyphen(self):
+        from jobsearch.tailor import normalise_dashes
+
+        assert normalise_dashes("led the team — and shipped") == "led the team - and shipped"
+
+    def test_a_closed_up_em_dash_stays_closed_up(self):
+        from jobsearch.tailor import normalise_dashes
+
+        assert normalise_dashes("New York—based") == "New York-based"
+
+    def test_en_dashes_in_ranges(self):
+        from jobsearch.tailor import normalise_dashes
+
+        assert normalise_dashes("2020–2022") == "2020-2022"
+
+    def test_html_entities(self):
+        from jobsearch.tailor import normalise_dashes
+
+        assert normalise_dashes("a &mdash; b &ndash; c") == "a - b - c"
+
+    def test_existing_hyphens_are_untouched(self):
+        from jobsearch.tailor import normalise_dashes
+
+        assert normalise_dashes("cross-functional, well-known") == "cross-functional, well-known"
+
+    def test_the_middot_separator_survives(self):
+        """The CV template uses · between education fields."""
+        from jobsearch.tailor import normalise_dashes
+
+        assert "·" in normalise_dashes("Stellenbosch · MSc · 2019")
+
+    def test_it_is_idempotent(self):
+        from jobsearch.tailor import normalise_dashes
+
+        once = normalise_dashes("a — b")
+        assert normalise_dashes(once) == once
+
+    def test_harden_html_applies_it_and_says_so(self):
+        from jobsearch.tailor import harden_html
+
+        html, notes = harden_html("<p>led the team — and shipped</p>", [])
+        assert "—" not in html
+        assert any("em and en dashes" in n for n in notes)
