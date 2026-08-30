@@ -338,3 +338,54 @@ class TestFitToPages:
 
         assert critical(out) == critical(html)
         assert "white-space: nowrap" in out
+
+
+class TestRepairAtsHtml:
+    """A CV written against an older template can be rescued mechanically.
+
+    Warning about a hazard is no use for a file that already exists; every
+    defect here is deterministic, so the repair is too.
+    """
+
+    OLD = (
+        "<style>\n"
+        '  h2 { font-variant: small-caps; letter-spacing: 1.2pt; margin: 8pt 0 4pt 0; }\n'
+        "  li { padding-left: 9pt; position: relative; margin-bottom: 1.8pt; }\n"
+        '  li::before { content: "\\2022"; position: absolute; left: 1pt; color: #555; }\n'
+        "</style>\n<h2>Experience</h2>\n"
+    )
+
+    def test_it_fixes_every_known_hazard(self):
+        from jobsearch.tailor import repair_ats_html
+
+        out, notes = repair_ats_html(self.OLD)
+        assert "small-caps" not in out
+        assert "letter-spacing: 0" in out
+        assert "position: absolute" not in out
+        assert "<h2>Professional Experience</h2>" in out
+        assert len(notes) == 5
+
+    def test_it_is_a_no_op_on_an_already_hardened_cv(self, cfg):
+        """The base CV must pass through untouched."""
+        from jobsearch.tailor import repair_ats_html
+
+        html = cfg.base_cv.read_text(encoding="utf-8")
+        out, notes = repair_ats_html(html)
+        assert out == html
+        assert notes == []
+
+    def test_repairing_twice_changes_nothing_further(self):
+        from jobsearch.tailor import repair_ats_html
+
+        once, _ = repair_ats_html(self.OLD)
+        twice, notes = repair_ats_html(once)
+        assert twice == once
+        assert notes == []
+
+    def test_harden_reports_repairs_before_warnings(self):
+        """A hazard that was repaired must not also be warned about."""
+        from jobsearch.tailor import harden_html
+
+        _, notes = harden_html(self.OLD, [])
+        assert any(n.startswith("repaired:") for n in notes)
+        assert not any("still contains an ATS hazard" in n for n in notes)

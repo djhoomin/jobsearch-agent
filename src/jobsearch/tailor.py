@@ -186,6 +186,50 @@ def strip_code_fences(text: str) -> str:
     return stripped.strip()
 
 
+ATS_REPAIRS: tuple[tuple[str, str, str], ...] = (
+    (
+        r"font-variant:\s*small-caps",
+        "font-variant: normal",
+        "replaced small-caps on headings (it corrupts extracted text)",
+    ),
+    (
+        r"(h2\s*\{[^}]*letter-spacing:\s*)[0-9.]+pt",
+        r"\g<1>0",
+        "zeroed heading letter-spacing (it injects stray spaces between characters)",
+    ),
+    (
+        r"li\s*\{([^}]*?)position:\s*relative;?",
+        r"li {\1text-indent: -8pt;",
+        "made bullets inline rather than absolutely positioned",
+    ),
+    (
+        r'li::before\s*\{\s*content:\s*"\\2022";\s*position:\s*absolute;\s*left:\s*[0-9.]+pt;',
+        'li::before { content: "\\2022\\00a0\\00a0";',
+        "attached bullet markers to their text",
+    ),
+    (
+        r"<h2>Experience</h2>",
+        "<h2>Professional Experience</h2>",
+        "renamed Experience to the ATS-standard Professional Experience",
+    ),
+)
+
+
+def repair_ats_html(html: str) -> tuple[str, list[str]]:
+    """Fix known ATS hazards in a CV written against an older template.
+
+    `harden_html` used to only warn about these. Warning is no use for a CV
+    that already exists: the defects are mechanical and so is the repair.
+    Every rule is a no-op on a CV that is already hardened.
+    """
+    notes: list[str] = []
+    for pattern, replacement, description in ATS_REPAIRS:
+        html, count = re.subn(pattern, replacement, html, flags=re.IGNORECASE | re.DOTALL)
+        if count:
+            notes.append(f"repaired: {description}")
+    return html, notes
+
+
 def protect_keywords(html: str, keywords: Sequence[str]) -> tuple[str, int]:
     """Wrap protected keywords in ``<span class="nb">`` so they cannot wrap.
 
@@ -239,9 +283,13 @@ def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, li
             html = _inject_css(html, snippet)
             notes.append("injected missing .nb { white-space: nowrap } rule")
 
+    html, repairs = repair_ats_html(html)
+    notes.extend(repairs)
+
+    # Warn only about hazards the repairs could not reach.
     for pattern, why in FORBIDDEN_CSS:
         if re.search(pattern, html, re.IGNORECASE | re.DOTALL):
-            notes.append(f"WARNING: generated CSS reintroduces an ATS hazard - {why}")
+            notes.append(f"WARNING: CSS still contains an ATS hazard - {why}")
 
     html, wrapped = protect_keywords(html, nowrap_keywords)
     if wrapped:
