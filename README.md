@@ -89,7 +89,7 @@ behaviour cannot drift between the two.
 ┌ jobsearch ─────────────────────────────────────────────┐
 │ Pipeline (14)         [/] filter                       │
 ├────────────────────────────────────────────────────────┤
-│ ▸ Northwind   Dir. Eng, AI  ✓ Amsterdam   4.15 ● Applied│
+│ ▸ Northwind   Dir. Eng, AI ✓ Amsterdam ✓ ✓ 4.15 ● Applied│
 │   Contoso AI  Head of AI    ✓ Remote (EU)  3.90 ○ New   │
 │   Initech     Dir. Research ? Spain        3.55 ◐ Scored│
 │   Example Co  VP AI         ✗ Remote - US  elim ✗ Elim  │
@@ -108,6 +108,8 @@ behaviour cannot drift between the two.
 | `enter` | Open the role page: constraints, per-dimension reasoning, notes, drafts |
 | `w` | Open the posting in your browser |
 | `c` | Attach a CV you already made (on the role page) |
+| `n` | Add a note (on the role page) |
+| `p` | Add a contact you found yourself (on the role page) |
 | `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
 | `n` | Add a role you found yourself; `ctrl+s` saves |
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |

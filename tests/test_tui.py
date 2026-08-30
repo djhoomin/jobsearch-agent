@@ -847,3 +847,79 @@ class TestSettingsScreen:
                 assert cfg.source.read_text(encoding="utf-8") == before
 
         asyncio.run(scenario())
+
+
+class TestNotesAndContacts:
+    def test_a_note_is_stored_and_shown_on_the_page(self, cfg):
+        from jobsearch.tui import add_note_blocking, role_detail_markup
+
+        job_id = seed(cfg)
+        assert "None yet" in role_detail_markup(cfg, job_id)
+        add_note_blocking(cfg, job_id, "Referred by a former colleague.")
+        assert "Referred by a former colleague." in role_detail_markup(cfg, job_id)
+
+    def test_an_empty_note_is_refused(self, cfg):
+        from jobsearch.tui import add_note_blocking
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            add_note_blocking(cfg, seed(cfg), "   ")
+
+    def test_notes_accumulate(self, cfg):
+        from jobsearch.tui import add_note_blocking, role_detail_markup
+
+        job_id = seed(cfg)
+        add_note_blocking(cfg, job_id, "first")
+        add_note_blocking(cfg, job_id, "second")
+        markup = role_detail_markup(cfg, job_id)
+        assert "first" in markup and "second" in markup
+
+    def test_a_manual_contact_does_not_replace_inferred_ones(self, cfg):
+        """save_outreach owns its contacts; one you add yourself must survive."""
+        from jobsearch.models import Contact, OutreachDraft
+        from jobsearch.tui import add_contact_blocking
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_outreach(
+                OutreachDraft(job_id=job_id, contacts=[Contact(title="VP Engineering")])
+            )
+        add_contact_blocking(cfg, job_id, name="Real Person", title="CTO")
+        with Tracker.from_config(cfg) as tracker:
+            titles = {str(c["title"]) for c in tracker.contacts(job_id)}
+        assert titles == {"VP Engineering", "CTO"}
+
+    def test_a_contact_needs_a_name_or_title(self, cfg):
+        from jobsearch.tui import add_contact_blocking
+
+        with pytest.raises(ValueError, match="name or a title"):
+            add_contact_blocking(cfg, seed(cfg), name="  ", title="  ")
+
+
+class TestPresenceColumns:
+    def test_the_table_has_cv_and_outreach_columns(self, cfg):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                from textual.widgets import DataTable
+
+                labels = [str(c.label) for c in app.query_one("#table", DataTable).columns.values()]
+                assert "CV" in labels and "Out" in labels
+
+        asyncio.run(scenario())
+
+    def test_outreach_ids_are_fetched_in_one_query(self, cfg):
+        from jobsearch.models import Contact, OutreachDraft
+        from jobsearch.tui import tracker_outreach_ids
+
+        with_outreach = seed(cfg, company="HasOutreach")
+        seed(cfg, company="Bare", title="Nothing Here")
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_outreach(
+                OutreachDraft(job_id=with_outreach, contacts=[Contact(title="VP Eng")])
+            )
+        ids = tracker_outreach_ids(cfg)
+        assert with_outreach in ids
+        assert len(ids) == 1

@@ -406,6 +406,37 @@ class Tracker:
             "SELECT * FROM outreach WHERE job_id = ? ORDER BY id DESC LIMIT 1", (job_id,)
         ).fetchone()
 
+    def job_ids_with_outreach(self) -> set[str]:
+        """Every job that has a draft or a contact, in one query.
+
+        The table needs this for a whole page of rows; asking per row would be
+        one query per line.
+        """
+        rows = self._conn.execute(
+            "SELECT job_id FROM outreach UNION SELECT job_id FROM contact"
+        ).fetchall()
+        return {str(r["job_id"]) for r in rows}
+
+    def add_contact(self, job_id: str, contact: Contact) -> None:
+        """Append one contact, keeping the existing ones.
+
+        `save_contacts` replaces the whole set because a draft owns its
+        contacts; a contact you found yourself has to be additive.
+        """
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO contact (job_id, name, title, rationale, search_url, created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (
+                    job_id,
+                    contact.name,
+                    contact.title,
+                    contact.rationale,
+                    contact.linkedin_search_url,
+                    _now(),
+                ),
+            )
+
     def contacts(self, job_id: str) -> list[sqlite3.Row]:
         return list(
             self._conn.execute(

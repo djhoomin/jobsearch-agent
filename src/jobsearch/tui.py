@@ -236,6 +236,14 @@ def scan_blocking(cfg: Config, tiers: list[int] | None = None) -> str:
     return summary
 
 
+def tracker_outreach_ids(cfg: Config) -> set[str]:
+    """Job ids that already have a draft or a contact."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        return tracker.job_ids_with_outreach()
+
+
 def location_cell(row: Any, cfg: Config) -> str:
     """Location plus a fitness glyph, using the same check the scorer uses.
 
@@ -304,6 +312,41 @@ def outreach_detail_text(cfg: Config, job_id: str) -> str:
 
     lines += ["", f"Full copy-pasteable version:  jobsearch show {job_id}"]
     return "\n".join(lines)
+
+
+def add_note_blocking(cfg: Config, job_id: str, body: str) -> str:
+    """Append a dated note to a role."""
+    from .tracker import Tracker
+
+    body = body.strip()
+    if not body:
+        raise ValueError("a note cannot be empty")
+    with Tracker.from_config(cfg) as tracker:
+        tracker.add_note(tracker.resolve_job_id(job_id), body)
+    return "note added"
+
+
+def add_contact_blocking(
+    cfg: Config, job_id: str, *, name: str, title: str = "", url: str = "", rationale: str = ""
+) -> str:
+    """Append a contact you found yourself, alongside any inferred ones."""
+    from .models import Contact
+    from .tracker import Tracker
+
+    name = name.strip()
+    if not name and not title.strip():
+        raise ValueError("a contact needs a name or a title")
+    with Tracker.from_config(cfg) as tracker:
+        tracker.add_contact(
+            tracker.resolve_job_id(job_id),
+            Contact(
+                title=title.strip(),
+                name=name,
+                rationale=rationale.strip(),
+                linkedin_search_url=url.strip(),
+            ),
+        )
+    return f"contact added: {name or title.strip()}"
 
 
 def candidate_cv_files(cfg: Config) -> list[Path]:
@@ -382,6 +425,7 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
         row = tracker.get_job(job_id)
         contacts = tracker.contacts(job_id)
         draft = tracker.latest_outreach(job_id)
+        notes_rows = tracker.notes(job_id)
         score_json = row["score_json"]
 
     def e(value: Any) -> str:
@@ -430,6 +474,13 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
     else:
         out.append(rule("SCORE"))
         out.append("  [dim]Not scored yet — press [b]s[/b].[/]")
+
+    out.append(rule("YOUR NOTES"))
+    if notes_rows:
+        for note in notes_rows:
+            out.append(f"  [dim]{e(str(_get(note, 'created_at', ''))[:10])}[/]  {e(_get(note, 'body', ''))}")
+    else:
+        out.append("  [dim]None yet — press [b]n[/b].[/]")
 
     out.append(rule("OUTREACH"))
     if contacts:
@@ -571,6 +622,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.dry_run = dry_run
             self.filter_text = ""
             self.show_dismissed = False
+            self.outreach_ids: set[str] = set()
             self.rows: list[Any] = []
             self.busy = False
             # The text last rendered into the detail pane. Kept on the app so
@@ -591,7 +643,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def on_mount(self) -> None:
             table = self.query_one("#table", DataTable)
-            table.add_columns("Company", "Title", "Location", "Score", "Status")
+            table.add_columns("Company", "Title", "Location", "CV", "Out", "Score", "Status")
             table.focus()
             self.title = "jobsearch"
             self.sub_title = str(self.cfg.source or self.cfg.root)
@@ -606,6 +658,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
             with Tracker.from_config(self.cfg) as tracker:
                 rows = tracker.list_jobs()
+            self.outreach_ids = tracker_outreach_ids(self.cfg)
             if not self.show_dismissed:
                 rows = [r for r in rows if str(_get(r, "status", "")) != DISMISSED_STATUS.value]
             needle = self.filter_text.strip().lower()
@@ -628,6 +681,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                     truncate(_get(row, "company", ""), 20),
                     truncate(_get(row, "title", ""), 32),
                     location_cell(row, self.cfg),
+                    "[green]✓[/]" if (_get(row, "cv_pdf_path") or _get(row, "cv_html_path")) else "[dim]·[/]",
+                    "[green]✓[/]" if str(_get(row, "job_id", "")) in self.outreach_ids else "[dim]·[/]",
                     score_cell(row),
                     f"{status_glyph(str(_get(row, 'status', '')))} {_get(row, 'status', '')}",
                 )
@@ -984,6 +1039,84 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def action_cancel(self) -> None:
             self.dismiss(None)
 
+    class NoteScreen(ModalScreen):  # type: ignore[misc]
+        """Add a dated note to a role."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel"),
+            Binding("ctrl+s", "save", "Save"),
+        ]
+
+        def __init__(self, cfg: Config, job_id: str) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.job_id = job_id
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="newrole"):
+                yield Static("[b]Add a note[/]  [dim]ctrl+s to save, esc to cancel[/]")
+                yield TextArea(id="note-body")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#note-body", TextArea).focus()
+
+        def action_save(self) -> None:
+            try:
+                message = add_note_blocking(
+                    self.cfg, self.job_id, self.query_one("#note-body", TextArea).text
+                )
+            except Exception as exc:  # noqa: BLE001 - shown on the role page
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.dismiss(message)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class ContactScreen(ModalScreen):  # type: ignore[misc]
+        """Add a contact you found yourself."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel"),
+            Binding("ctrl+s", "save", "Save"),
+        ]
+
+        def __init__(self, cfg: Config, job_id: str) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.job_id = job_id
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="newrole"):
+                yield Static("[b]Add a contact[/]  [dim]name or title required · ctrl+s to save[/]")
+                yield Input(placeholder="name", id="c-name")
+                yield Input(placeholder="title / role", id="c-title")
+                yield Input(placeholder="LinkedIn or email", id="c-url")
+                yield Input(placeholder="how you know them, or why they matter", id="c-why")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#c-name", Input).focus()
+
+        def action_save(self) -> None:
+            def value(name: str) -> str:
+                return self.query_one(f"#c-{name}", Input).value
+
+            try:
+                message = add_contact_blocking(
+                    self.cfg, self.job_id,
+                    name=value("name"), title=value("title"),
+                    url=value("url"), rationale=value("why"),
+                )
+            except Exception as exc:  # noqa: BLE001 - shown on the role page
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.dismiss(message)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
     class AttachCvScreen(ModalScreen):  # type: ignore[misc]
         """Pick a CV already on disk, or type a path."""
 
@@ -1153,6 +1286,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("v", "stage('verify')", "Verify"),
             Binding("w", "open_url", "Open posting"),
             Binding("c", "attach_cv", "Attach CV"),
+            Binding("n", "add_note", "Note"),
+            Binding("p", "add_contact", "Contact"),
         ]
 
         def __init__(self, cfg: Config, job_id: str) -> None:
@@ -1198,6 +1333,12 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def action_dismiss_screen(self) -> None:
             self.dismiss()
+
+        def action_add_note(self) -> None:
+            self.app.push_screen(NoteScreen(self.cfg, self.job_id), self.after_attach)
+
+        def action_add_contact(self) -> None:
+            self.app.push_screen(ContactScreen(self.cfg, self.job_id), self.after_attach)
 
         def action_attach_cv(self) -> None:
             self.app.push_screen(AttachCvScreen(self.cfg, self.job_id), self.after_attach)
