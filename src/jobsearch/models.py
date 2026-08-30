@@ -68,7 +68,9 @@ TRANSITIONS: dict[Status, set[Status]] = {
     Status.INTERVIEWING: {Status.OFFER, Status.REJECTED, Status.WITHDRAWN, Status.PARKED},
     Status.OFFER: {Status.WITHDRAWN, Status.REJECTED},
     Status.REJECTED: {Status.PARKED},
-    Status.WITHDRAWN: {Status.PARKED},
+    # Dismissing a role (TUI `d`) parks it here, so this must be reversible:
+    # a role dismissed on a skim is sometimes one you later apply to.
+    Status.WITHDRAWN: {Status.PARKED, Status.NOT_STARTED, Status.APPLIED},
 }
 
 

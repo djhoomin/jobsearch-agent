@@ -344,3 +344,28 @@ def test_clamp_score_bounds_out_of_range_values():
     assert _clamp_score(-2) == 0.0
     assert _clamp_score(3) == 3.0
     assert _clamp_score("not a number") == 0.0
+
+
+class TestDismissalIsReversible:
+    """A role dismissed on a skim is sometimes one you later apply to.
+
+    Withdrawn used to allow only Parked, which made the TUI's `d` effectively
+    one-way and contradicted the "press a to restore" hint it printed.
+    """
+
+    def test_withdrawn_can_return_to_the_pipeline(self):
+        from jobsearch.models import Status, can_transition
+
+        assert can_transition(Status.WITHDRAWN, Status.NOT_STARTED)
+        assert can_transition(Status.WITHDRAWN, Status.APPLIED)
+        assert can_transition(Status.WITHDRAWN, Status.PARKED)
+
+    def test_transitions_has_no_duplicate_keys(self):
+        """A duplicated dict key silently overrides the earlier one."""
+        import re
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[1] / "src/jobsearch/models.py").read_text()
+        block = source[source.index("TRANSITIONS"): source.index("def can_transition")]
+        keys = re.findall(r"Status\.([A-Z_]+):", block)
+        assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
