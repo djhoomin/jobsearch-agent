@@ -1446,3 +1446,54 @@ class TestSharedContactsSurviveRenames:
         with Tracker.from_config(cfg) as tracker:
             titles = sorted(str(c["title"]) for c in tracker.contacts(ids[1]))
         assert titles == ["Head of Talent", "VP Engineering"]
+
+
+class TestLetterRendering:
+    """A stored path can go stale - the file gets renamed or moved. Rendering
+    an empty section reads as "no letter" when the truth is "cannot find it".
+    """
+
+    def _with_letter(self, cfg, body="Hello,\n\nA letter.\n"):
+        path = cfg.ensure_output_dir() / "letters" / "Cover_Letter_Northwind.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_letter(job_id, str(path))
+        return job_id, path
+
+    def test_the_letter_body_is_shown(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        job_id, _ = self._with_letter(cfg)
+        markup = role_detail_markup(cfg, job_id)
+        assert "COVER LETTER" in markup
+        assert "A letter." in markup
+
+    def test_a_missing_file_says_so_rather_than_rendering_nothing(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        job_id, path = self._with_letter(cfg)
+        path.unlink()
+        markup = role_detail_markup(cfg, job_id)
+        assert "cannot read it" in markup
+        assert "press [b]b[/b] to write it again" in markup
+
+    def test_an_empty_file_is_distinguished_from_a_missing_one(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        job_id, path = self._with_letter(cfg, body="   \n")
+        path.write_text("   \n", encoding="utf-8")
+        assert "the file is empty" in role_detail_markup(cfg, job_id)
+
+    def test_no_letter_means_no_section(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        assert "COVER LETTER" not in role_detail_markup(cfg, seed(cfg))
+
+    def test_brackets_in_a_letter_survive(self, cfg):
+        """Letters contain [name] placeholders; markup would swallow them."""
+        from jobsearch.tui import role_detail_markup
+
+        job_id, _ = self._with_letter(cfg, body="Hi [name],\n\nRegards.\n")
+        assert "\\[name]" in role_detail_markup(cfg, job_id)

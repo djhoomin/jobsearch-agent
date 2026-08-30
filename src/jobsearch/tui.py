@@ -702,10 +702,12 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
         out.append(f"  [dim]{e(letter_path)}[/]")
         try:
             body = Path(str(letter_path)).read_text(encoding="utf-8").strip()
-        except OSError:
-            body = ""
-        if body:
-            out.append(f"  [dim]{e(body)}[/]")
+            out.append(f"  [dim]{e(body)}[/]" if body else "  [yellow]the file is empty[/]")
+        except OSError as exc:
+            # Say so. Swallowing this rendered an empty section, which reads as
+            # "no letter" when the truth is "the file moved".
+            out.append(f"  [red]cannot read it:[/] {e(exc)}")
+            out.append("  [dim]press [b]b[/b] to write it again[/]")
         letter_claims = _get(row, "letter_claims_json")
         if letter_claims:
             bad = [c for c in json.loads(letter_claims) if not c.get("grounded")]
