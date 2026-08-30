@@ -590,4 +590,11 @@ src/jobsearch/
 
 ## Licence
 
-MIT. Personal tool; no support implied.
+[MIT](LICENSE) — © 2026 DJ Human.
+
+Use it, fork it, ship it. The one thing worth lifting on its own is
+[the ATS verifier](#4-verify-the-ats-verifier): it needs only `pypdf` and a
+headless Chrome, and it will tell you things about your own CV that looking at
+it will not.
+
+Personal tool, no support implied.
