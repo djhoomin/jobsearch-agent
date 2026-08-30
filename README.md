@@ -105,7 +105,8 @@ behaviour cannot drift between the two.
 | `t` | Tailor a CV for it |
 | `o` | Draft outreach |
 | `v` | Run the ATS verifier on its CV |
-| `enter` | Read the drafted contacts and outreach messages |
+| `enter` | Open the role: constraints, per-dimension reasoning, notes, drafts |
+| `w` | Open the posting in your browser |
 | `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
 | `n` | Add a role you found yourself; `ctrl+s` saves |
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |

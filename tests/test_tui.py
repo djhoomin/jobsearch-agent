@@ -199,22 +199,46 @@ class TestOutreachView:
 
         assert "No contacts yet" in outreach_detail_text(cfg, seed(cfg))
 
-    def test_enter_opens_the_screen(self, cfg):
-        from jobsearch.models import Contact
+    def test_pressing_enter_opens_the_role_screen(self, cfg):
+        """Press the actual key.
 
-        job_id = seed(cfg)
-        with Tracker.from_config(cfg) as tracker:
-            tracker.save_contacts(job_id, [Contact(title="VP Engineering", linkedin_search_url="https://x.test/1")])
+        DataTable consumes Enter and emits RowSelected, so an App-level
+        Binding("enter", ...) never fires. The previous version of this test
+        called the action directly and passed while the key did nothing.
+        """
+        seed(cfg)
 
         async def scenario():
             app = build_app(cfg)
             async with app.run_test() as pilot:
                 await pilot.pause()
-                app.action_open_outreach()
+                await pilot.press("enter")
                 await pilot.pause()
-                assert len(app.screen_stack) == 2
+                assert len(app.screen_stack) == 2, "enter must open the role screen"
+                await pilot.press("escape")
+                await pilot.pause()
+                assert len(app.screen_stack) == 1
 
         asyncio.run(scenario())
+
+    def test_role_detail_shows_scoring_and_drafts(self, cfg):
+        from jobsearch.models import Contact, OutreachDraft, ScoreReport
+        from jobsearch.tui import role_detail_text
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_outreach(
+                OutreachDraft(
+                    job_id=job_id,
+                    contacts=[Contact(title="VP Engineering", linkedin_search_url="https://x.test/1")],
+                    linkedin_message="Saw the posting.",
+                )
+            )
+        text = role_detail_text(cfg, job_id)
+        assert "Northwind" in text
+        assert "Not scored yet" in text
+        assert "VP Engineering" in text
+        assert "Saw the posting." in text
 
 
 def test_save_outreach_replaces_contacts(cfg):

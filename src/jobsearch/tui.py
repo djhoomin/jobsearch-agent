@@ -306,6 +306,58 @@ def outreach_detail_text(cfg: Config, job_id: str) -> str:
     return "\n".join(lines)
 
 
+def role_detail_text(cfg: Config, job_id: str) -> str:
+    """Everything known about one role, as plain text.
+
+    Markup-free: postings and drafts contain literal square brackets that
+    Textual markup would swallow.
+    """
+    import json
+
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        row = tracker.get_job(job_id)
+        score_json = row["score_json"]
+
+    lines = [
+        f"{_get(row, 'company', '')} — {_get(row, 'title', '')}",
+        "",
+        f"status    {_get(row, 'status', '')}",
+        f"location  {_get(row, 'location', '') or '—'}",
+        f"url       {_get(row, 'url', '') or '—'}",
+    ]
+    cv = _get(row, "cv_pdf_path") or _get(row, "cv_html_path")
+    if cv:
+        lines.append(f"cv        {cv}")
+
+    if score_json:
+        data = json.loads(score_json)
+        lines += ["", "HARD CONSTRAINTS"]
+        for c in data.get("constraints", {}).get("results", []):
+            mark = {"pass": "ok ", "fail": "FAIL", "unknown": " ? "}.get(c["verdict"], "   ")
+            lines.append(f"  [{mark}] {c['name']}: {c['reason']}")
+
+        weighted = data.get("weighted")
+        header = f"SCORE {weighted:.2f}" if weighted is not None else "SCORE —"
+        rec = data.get("recommendation")
+        lines += ["", f"{header}   recommendation: {rec or '—'}"]
+        for dim in data.get("dimensions", []):
+            lines += ["", f"  {dim['name']} {dim['score']}/5", f"    {dim['reasoning']}"]
+            for ev in dim.get("evidence", [])[:4]:
+                lines.append(f"      · {ev}")
+
+        notes = (data.get("notes") or "").strip()
+        if notes:
+            lines += ["", "NOTES AND QUESTIONS", f"  {notes}"]
+    else:
+        lines += ["", "Not scored yet — press s."]
+
+    lines += ["", "-" * 60, "", outreach_detail_text(cfg, job_id)]
+    return "\n".join(lines)
+
+
 def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
     """Construct the Textual app. Imports Textual lazily so import is cheap."""
     _require_textual()
@@ -341,7 +393,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("t", "stage('tailor')", "Tailor"),
             Binding("o", "stage('outreach')", "Outreach"),
             Binding("v", "stage('verify')", "Verify"),
-            Binding("enter", "open_outreach", "Read drafts"),
+            Binding("w", "open_url", "Open posting"),
             Binding("a", "set_status", "Status"),
             Binding("n", "new_role", "Add role"),
             Binding("d", "dismiss", "Dismiss"),
@@ -575,11 +627,31 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 self.log_line(result)
             self.action_refresh_rows()
 
-        def action_open_outreach(self) -> None:
+        def on_data_table_row_selected(self, _event: Any) -> None:
+            """Enter. DataTable consumes the key itself, so an App-level
+            Binding("enter", ...) never fires - this event is the hook."""
+            self.action_open_role()
+
+        def action_open_role(self) -> None:
             row = self.selected_row()
             if row is None:
                 return
-            self.push_screen(OutreachScreen(self.cfg, str(_get(row, "job_id", ""))))
+            self.push_screen(RoleScreen(self.cfg, str(_get(row, "job_id", ""))))
+
+        # Kept so the old name still works from tests and any muscle memory.
+        def action_open_outreach(self) -> None:
+            self.action_open_role()
+
+        def action_open_url(self) -> None:
+            import webbrowser
+
+            row = self.selected_row()
+            url = str(_get(row, "url", "")) if row is not None else ""
+            if not url:
+                self.log_line("[yellow]no URL on this role[/]")
+                return
+            webbrowser.open(url)
+            self.log_line(f"opened [dim]{url}[/]")
 
         # -- filtering ----------------------------------------------------
 
@@ -777,10 +849,13 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def action_cancel(self) -> None:
             self.dismiss(None)
 
-    class OutreachScreen(ModalScreen):  # type: ignore[misc]
-        """Full contacts and drafted messages for one job."""
+    class RoleScreen(ModalScreen):  # type: ignore[misc]
+        """Everything known about one role: constraints, scoring, drafts."""
 
-        BINDINGS = [Binding("escape,q,enter", "dismiss_screen", "Back")]
+        BINDINGS = [
+            Binding("escape,q,enter", "dismiss_screen", "Back"),
+            Binding("w", "open_url", "Open posting"),
+        ]
 
         def __init__(self, cfg: Config, job_id: str) -> None:
             super().__init__()
@@ -790,11 +865,21 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def compose(self) -> ComposeResult:
             with VerticalScroll(id="outreach"):
                 # markup=False: drafts contain literal [name] placeholders.
-                yield Static(outreach_detail_text(self.cfg, self.job_id), markup=False)
+                yield Static(role_detail_text(self.cfg, self.job_id), markup=False)
             yield Footer()
 
         def action_dismiss_screen(self) -> None:
             self.dismiss()
+
+        def action_open_url(self) -> None:
+            import webbrowser
+
+            from .tracker import Tracker
+
+            with Tracker.from_config(self.cfg) as tracker:
+                url = str(tracker.get_job(tracker.resolve_job_id(self.job_id))["url"] or "")
+            if url:
+                webbrowser.open(url)
 
     return JobSearchTUI()
 

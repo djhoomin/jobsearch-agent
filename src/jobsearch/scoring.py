@@ -38,7 +38,7 @@ DIMENSIONS = ("buyer", "role_fit", "company", "domain", "talent")
 DIMENSION_LABELS = {
     "buyer": "Buyer (business pain + budget)",
     "role_fit": "Role fit (altitude + hands-on room)",
-    "company": "Company (stage, founders, runway)",
+    "company": "Company (stage, founders, stability)",
     "domain": "Domain (edge match + tailwind)",
     "talent": "Talent density / learning",
 }
