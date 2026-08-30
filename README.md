@@ -116,7 +116,7 @@ behaviour cannot drift between the two.
 | Key | Does |
 |---|---|
 | `enter` | Open the role page |
-| `s` `t` `o` `v` | Score · tailor · draft outreach · verify the CV |
+| `s` `t` `b` `o` `v` | Score · tailor · cover letter · draft outreach · verify the CV |
 | `f` | Scan the boards — pick all tiers or one |
 | `a` | Set status; only legal transitions are offered |
 | `n` | Add a role you found yourself |
@@ -133,12 +133,12 @@ evidence, the grounding audit, your notes, contacts and drafts.
 
 | Key | Does |
 |---|---|
-| `s` `t` `o` `v` | The same four stages, without leaving the page |
+| `s` `t` `b` `o` `v` | The same five stages, without leaving the page |
 | `w` | Open the posting in your browser |
 | `c` | Attach a CV you already made |
 | `n` | Add a note |
 | `p` | Add a contact you found yourself |
-| `l` `y` `Y` | Copy the contact links · contacts and drafts · the whole page |
+| `l` `y` `Y` `B` | Copy the contact links · contacts and drafts · the whole page · the letter |
 | `esc` | Back |
 
 The location column carries a fitness glyph from the same `check_location` the

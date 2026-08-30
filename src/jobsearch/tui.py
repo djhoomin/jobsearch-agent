@@ -696,6 +696,24 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
         else:
             out.append(f"  [green]all {len(claims)} claim(s) traced to the dossier[/]")
 
+    letter_path = _get(row, "letter_path")
+    if letter_path:
+        out.append(rule("COVER LETTER"))
+        out.append(f"  [dim]{e(letter_path)}[/]")
+        try:
+            body = Path(str(letter_path)).read_text(encoding="utf-8").strip()
+        except OSError:
+            body = ""
+        if body:
+            out.append(f"  [dim]{e(body)}[/]")
+        letter_claims = _get(row, "letter_claims_json")
+        if letter_claims:
+            bad = [c for c in json.loads(letter_claims) if not c.get("grounded")]
+            if bad:
+                out.append(f"\n  [yellow]{len(bad)} ungrounded claim(s) in the letter[/]")
+                for claim in bad:
+                    out.append(f"  [yellow]·[/] {e(claim.get('text', ''))}")
+
     out.append(rule("YOUR NOTES"))
     if notes_rows:
         for note in notes_rows:
@@ -822,6 +840,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         BINDINGS = [
             Binding("s", "stage('score')", "Score"),
             Binding("t", "stage('tailor')", "Tailor"),
+            Binding("b", "stage('letter')", "Letter"),
             Binding("o", "stage('outreach')", "Outreach"),
             Binding("v", "stage('verify')", "Verify"),
             Binding("w", "open_url", "Open posting"),
@@ -1633,6 +1652,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("escape,q", "dismiss_screen", "Back"),
             Binding("s", "stage('score')", "Score"),
             Binding("t", "stage('tailor')", "Tailor"),
+            Binding("b", "stage('letter')", "Letter"),
             Binding("o", "stage('outreach')", "Outreach"),
             Binding("v", "stage('verify')", "Verify"),
             Binding("w", "open_url", "Open posting"),
@@ -1642,6 +1662,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("y", "copy_outreach", "Copy outreach"),
             Binding("l", "copy_links", "Copy links"),
             Binding("Y", "copy_all", "Copy page"),
+            Binding("B", "copy_letter", "Copy letter"),
         ]
 
         def __init__(self, cfg: Config, job_id: str) -> None:
@@ -1693,6 +1714,19 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def action_copy_links(self) -> None:
             self._copy(contact_links_text(self.cfg, self.job_id))
+
+        def action_copy_letter(self) -> None:
+            from .tracker import Tracker
+
+            with Tracker.from_config(self.cfg) as tracker:
+                path = _get(tracker.get_job(tracker.resolve_job_id(self.job_id)), "letter_path")
+            if not path:
+                self._copy("")
+                return
+            try:
+                self._copy(Path(str(path)).read_text(encoding="utf-8"))
+            except OSError as exc:
+                self.query_one("#rolestatus", Static).update(f"  [red]{exc}[/]")
 
         def action_copy_outreach(self) -> None:
             self._copy(outreach_detail_text(self.cfg, self.job_id))
@@ -1786,6 +1820,20 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
             pages = f"  {result.pages}pp" if result.pages else ""
             fit = f"  [dim]({len(result.fit_notes)} compaction step(s))[/]" if result.fit_notes else ""
             return f"tailored {name}{pages}{fit}  {flag}  [dim]press v to verify[/]"
+
+        if stage == "letter":
+            from .letter import write_letter
+
+            result = write_letter(posting, cfg, client)
+            if not dry_run:
+                tracker.save_letter(job_id, result.path, [c.to_dict() for c in result.claims])
+            ungrounded = len(result.ungrounded)
+            flag = (
+                "[green]0 ungrounded claims[/]"
+                if ungrounded == 0
+                else f"[yellow]{ungrounded} ungrounded claim(s) — review[/]"
+            )
+            return f"letter written  {result.word_count} words  {flag}"
 
         if stage == "outreach":
             from .outreach import draft_outreach

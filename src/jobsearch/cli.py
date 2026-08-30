@@ -294,6 +294,34 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def cmd_letter(cfg: Config, args: argparse.Namespace) -> int:
+    from .letter import write_letter
+
+    tracker = _tracker(cfg)
+    client = _client(cfg, args)
+    try:
+        job_id = tracker.resolve_job_id(args.job_id)
+        posting = tracker.get_posting(job_id)
+        result = write_letter(
+            posting, cfg, client,
+            verify_claims=not args.no_verify_claims,
+            instruction=args.instruction or "",
+        )
+        print(result.text)
+        print(f"\n  {result.word_count} words -> {result.path}")
+        if result.ungrounded:
+            print(f"\n  {len(result.ungrounded)} ungrounded claim(s):")
+            for claim in result.ungrounded:
+                print(f"    - {claim.text}")
+            print("  Review these before sending.")
+        if not args.dry_run:
+            tracker.save_letter(job_id, result.path, [c.to_dict() for c in result.claims])
+        _print_usage(client)
+    finally:
+        tracker.close()
+    return 0
+
+
 def cmd_verify(cfg: Config, args: argparse.Namespace) -> int:
     from .ats import verify_from_config
 
@@ -817,6 +845,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_tailor)
 
     # verify
+    p = sub.add_parser(
+        "letter",
+        help="Write a short, grounded cover letter for a role",
+    )
+    p.add_argument("job_id")
+    p.add_argument("--instruction", help="Extra steer, e.g. 'lead on the FDE angle'")
+    p.add_argument("--no-verify-claims", action="store_true", help="Skip the grounding audit")
+    p.set_defaults(func=cmd_letter)
+
     p = sub.add_parser(
         "verify",
         help="Run the ATS verifier against any PDF",

@@ -168,6 +168,8 @@ class Tracker:
         # later rename still finds them. Matching on name or title cannot
         # survive the rename that most often prompts the copy.
         ("contact", "group_id INTEGER"),
+        ("job", "letter_path TEXT"),
+        ("job", "letter_claims_json TEXT"),
     )
 
     def _add_missing_columns(self) -> None:
@@ -411,6 +413,17 @@ class Tracker:
             )
 
     # -- contacts and outreach --------------------------------------------
+    def save_letter(
+        self, job_id: str, path: str, claims: list[dict[str, Any]] | None = None
+    ) -> None:
+        """Record a generated cover letter and its grounding audit."""
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE job SET letter_path=?, letter_claims_json=?, updated_at=?"
+                " WHERE job_id=?",
+                (path, json.dumps(claims) if claims else None, _now(), job_id),
+            )
+
     def save_contacts(self, job_id: str, contacts: Sequence[Contact]) -> None:
         now = _now()
         with self._tx() as conn:
