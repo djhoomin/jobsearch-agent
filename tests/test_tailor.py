@@ -78,7 +78,11 @@ class TestHelpers:
         from jobsearch.models import JobPosting
 
         posting = JobPosting(company="Dash0 / Acme, Inc.", title="Director", url="https://x")
-        assert output_stem(posting) == "DJ_Human_CV_Dash0AcmeInc"
+        # Company alone is no longer the whole stem: a role discriminator was
+        # added so two roles at one employer cannot overwrite each other.
+        stem = output_stem(posting)
+        assert stem.startswith("DJ_Human_CV_Dash0AcmeInc")
+        assert not set(stem) & set('/\\:*?"<>| ')
 
 
 class TestTailorStage:
@@ -111,7 +115,8 @@ class TestTailorStage:
 
     def test_writes_html_and_reports_ungrounded_claims(self, cfg, wired, posting):
         result = tailor_cv(posting, cfg, wired, render=False)
-        assert result.html_path.endswith("DJ_Human_CV_Weaviate.html")
+        assert result.html_path.endswith(".html")
+        assert "DJ_Human_CV_Weaviate" in result.html_path
         assert len(result.claims) == 2
         assert len(result.ungrounded) == 1
         assert result.ungrounded[0].severity == "block"
@@ -439,3 +444,71 @@ class TestNormaliseDashes:
         html, notes = harden_html("<p>led the team — and shipped</p>", [])
         assert "—" not in html
         assert any("em and en dashes" in n for n in notes)
+
+
+class TestFilenamesAreUniquePerRole:
+    """Company-only names collide: one employer can have a dozen roles open,
+    and the same title in several cities. The second write would overwrite the
+    first and leave both job rows pointing at the survivor.
+    """
+
+    def _posting(self, title, location, job_id):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(
+            company="Databricks", title=title, url=f"https://x.test/{job_id}",
+            location=location, job_id=job_id,
+        )
+
+    def test_same_title_different_cities_do_not_collide(self):
+        from jobsearch.tailor import output_stem
+
+        a = self._posting("Manager, Forward Deployed Engineering", "Amsterdam", "db-manager-4597")
+        b = self._posting("Manager, Forward Deployed Engineering", "Singapore", "db-manager-87f6")
+        assert output_stem(a) != output_stem(b)
+
+    def test_different_titles_at_one_company_do_not_collide(self):
+        from jobsearch.tailor import output_stem
+
+        a = self._posting("Manager, Forward Deployed Engineering", "Amsterdam", "db-a-1111")
+        b = self._posting("Senior Manager, Forward Deployed Engineering", "Amsterdam", "db-b-2222")
+        assert output_stem(a) != output_stem(b)
+
+    def test_letters_and_cvs_use_the_same_discriminator(self, cfg):
+        from jobsearch.letter import letter_path_for
+        from jobsearch.tailor import role_slug
+
+        posting = self._posting("Manager, FDE", "Amsterdam", "db-manager-4597")
+        assert role_slug(posting) in letter_path_for(cfg, posting).name
+
+    def test_the_name_stays_readable(self):
+        from jobsearch.tailor import output_stem
+
+        stem = output_stem(self._posting("Manager, Forward Deployed Engineering", "Amsterdam", "db-x-4597"))
+        assert stem.startswith("DJ_Human_CV_Databricks")
+        assert stem.endswith("4597")
+        assert len(stem) <= 82
+
+    def test_it_is_deterministic(self):
+        from jobsearch.tailor import output_stem
+
+        posting = self._posting("Manager, FDE", "Amsterdam", "db-manager-4597")
+        assert output_stem(posting) == output_stem(posting)
+
+    def test_a_posting_without_a_job_id_still_gets_a_unique_stem(self):
+        """`add` builds the id on save; a stem may be needed before that."""
+        from jobsearch.models import JobPosting
+        from jobsearch.tailor import output_stem
+
+        a = JobPosting(company="Databricks", title="Manager, FDE", url="https://x.test/1")
+        b = JobPosting(company="Databricks", title="Manager, FDE", url="https://x.test/2")
+        assert output_stem(a) != output_stem(b)
+
+    def test_punctuation_is_stripped_from_the_filename(self):
+        from jobsearch.models import JobPosting
+        from jobsearch.tailor import output_stem
+
+        stem = output_stem(
+            JobPosting(company="Abacus.AI", title="Director, Data Science", url="", job_id="x-1234")
+        )
+        assert "." not in stem and "," not in stem

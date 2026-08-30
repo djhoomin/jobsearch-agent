@@ -29,7 +29,7 @@ from typing import Any, Callable, Sequence
 
 from .claude import ClaudeClient, stable_context_for
 from .config import Config
-from .models import Claim, JobPosting, TailorResult
+from .models import Claim, JobPosting, TailorResult, make_job_id
 
 log = logging.getLogger(__name__)
 
@@ -351,10 +351,30 @@ def extract_headline(html: str) -> str:
     return html_to_text(match.group(1)) if match else ""
 
 
-def output_stem(posting: JobPosting) -> str:
-    """A predictable filename stem: ``DJ_Human_CV_Weaviate``."""
+def role_slug(posting: JobPosting) -> str:
+    """A unique, readable identifier for one posting.
+
+    Company alone is not enough. A single employer can have a dozen roles open,
+    and the same title in several cities - Databricks currently lists "Manager,
+    Forward Deployed Engineering" in Amsterdam, Singapore and Tokyo. Naming by
+    company alone means the second CV silently overwrites the first and both
+    job rows point at the survivor.
+
+    The trailing hash comes from the job id, which is what actually guarantees
+    uniqueness; the company and title words are there so a human can tell which
+    file to attach.
+    """
     company = re.sub(r"[^A-Za-z0-9]+", "", posting.company) or "Role"
-    return f"DJ_Human_CV_{company}"
+    words = re.findall(r"[A-Za-z0-9]+", posting.title)[:4]
+    title = "".join(word.capitalize() for word in words)
+    job_id = posting.job_id or make_job_id(posting.company, posting.title, posting.url)
+    suffix = job_id.rsplit("-", 1)[-1]
+    return "_".join(part for part in (company, title, suffix) if part)[:70]
+
+
+def output_stem(posting: JobPosting) -> str:
+    """CV filename stem, e.g. ``DJ_Human_CV_Databricks_ManagerForwardDeployed_4597``."""
+    return f"DJ_Human_CV_{role_slug(posting)}"
 
 
 # ---------------------------------------------------------------------------

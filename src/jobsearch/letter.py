@@ -18,7 +18,7 @@ from pathlib import Path
 from .claude import ClaudeClient, stable_context_for
 from .config import Config
 from .models import Claim, JobPosting
-from .tailor import ground_claims, normalise_dashes
+from .tailor import ground_claims, normalise_dashes, role_slug
 
 log = logging.getLogger(__name__)
 
@@ -88,8 +88,7 @@ def letter_path_for(cfg: Config, posting: JobPosting) -> Path:
     letter called DJ_Human_CV_Databricks.txt is the kind of thing that ends up
     attached to the wrong field of an application form.
     """
-    company = re.sub(r"[^A-Za-z0-9]+", "", posting.company) or "Role"
-    return cfg.ensure_output_dir() / "letters" / f"Cover_Letter_{company}.txt"
+    return cfg.ensure_output_dir() / "letters" / f"Cover_Letter_{role_slug(posting)}.txt"
 
 
 def strip_stray_markdown(text: str) -> str:

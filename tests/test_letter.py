@@ -20,14 +20,17 @@ class TestNaming:
     def test_a_letter_is_not_named_like_a_cv(self, cfg):
         """DJ_Human_CV_Databricks.txt gets attached to the wrong form field."""
         path = letter_path_for(cfg, posting())
-        assert path.name == "Cover_Letter_Databricks.txt"
+        assert path.name.startswith("Cover_Letter_Databricks")
+        assert path.name.endswith(".txt")
         assert "CV" not in path.name
 
     def test_punctuation_in_a_company_name_is_stripped(self, cfg):
-        assert letter_path_for(cfg, posting("Abacus.AI")).name == "Cover_Letter_AbacusAI.txt"
+        name = letter_path_for(cfg, posting("Abacus.AI")).name
+        assert name.startswith("Cover_Letter_AbacusAI")
+        assert "." not in name[:-4], "only the extension may contain a dot"
 
     def test_an_empty_company_still_yields_a_path(self, cfg):
-        assert letter_path_for(cfg, posting("")).name == "Cover_Letter_Role.txt"
+        assert letter_path_for(cfg, posting("")).name.startswith("Cover_Letter_Role")
 
     def test_letters_live_beside_the_cvs_not_among_them(self, cfg):
         assert letter_path_for(cfg, posting()).parent.name == "letters"
