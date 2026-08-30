@@ -207,3 +207,69 @@ class TestClaimReport:
     def test_no_audit_is_reported_honestly(self):
         report = format_claim_report(TailorResult(job_id="x", html_path="x.html"))
         assert "no grounding audit" in report
+
+
+class TestProtectKeywords:
+    """The prompt asks the model to wrap protected keywords; it does not do it
+    reliably, and a split keyword is not a literal ATS match. So the hardening
+    step does it mechanically.
+    """
+
+    KEYWORDS = ["cross-functional", "on-device", "human-in-the-loop"]
+
+    def test_it_wraps_a_bare_keyword(self):
+        from jobsearch.tailor import protect_keywords
+
+        html, n = protect_keywords("<p>led cross-functional teams</p>", self.KEYWORDS)
+        assert html == '<p>led <span class="nb">cross-functional</span> teams</p>'
+        assert n == 1
+
+    def test_it_is_idempotent(self):
+        """Hardening twice must not nest spans."""
+        from jobsearch.tailor import protect_keywords
+
+        once, _ = protect_keywords("<p>on-device</p>", self.KEYWORDS)
+        twice, n = protect_keywords(once, self.KEYWORDS)
+        assert twice == once
+        assert n == 0
+
+    def test_it_ignores_style_and_title(self):
+        from jobsearch.tailor import protect_keywords
+
+        html, n = protect_keywords(
+            "<style>.a{on-device}</style><title>on-device</title><p>on-device</p>",
+            self.KEYWORDS,
+        )
+        assert n == 1, "only the body text should be wrapped"
+        assert "<style>.a{on-device}</style>" in html
+
+    def test_it_does_not_touch_tag_internals(self):
+        from jobsearch.tailor import protect_keywords
+
+        html, _ = protect_keywords('<a href="/on-device">link</a>', self.KEYWORDS)
+        assert 'href="/on-device"' in html
+
+    def test_it_matches_case_insensitively_and_preserves_case(self):
+        from jobsearch.tailor import protect_keywords
+
+        html, n = protect_keywords("<p>On-Device work</p>", self.KEYWORDS)
+        assert '<span class="nb">On-Device</span>' in html
+        assert n == 1
+
+    def test_longer_keywords_win(self):
+        from jobsearch.tailor import protect_keywords
+
+        html, _ = protect_keywords("<p>human-in-the-loop</p>", ["human-in-the-loop", "loop"])
+        assert '<span class="nb">human-in-the-loop</span>' in html
+
+    def test_no_keywords_is_a_no_op(self):
+        from jobsearch.tailor import protect_keywords
+
+        assert protect_keywords("<p>x</p>", []) == ("<p>x</p>", 0)
+
+    def test_harden_html_applies_it_and_reports(self):
+        from jobsearch.tailor import harden_html
+
+        html, notes = harden_html("<p>cross-functional</p>", self.KEYWORDS)
+        assert '<span class="nb">cross-functional</span>' in html
+        assert any("protected keyword" in n for n in notes)

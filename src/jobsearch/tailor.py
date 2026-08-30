@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .claude import ClaudeClient, stable_context_for
 from .config import Config
@@ -186,7 +186,51 @@ def strip_code_fences(text: str) -> str:
     return stripped.strip()
 
 
-def harden_html(html: str) -> tuple[str, list[str]]:
+def protect_keywords(html: str, keywords: Sequence[str]) -> tuple[str, int]:
+    """Wrap protected keywords in ``<span class="nb">`` so they cannot wrap.
+
+    The prompt asks the model to do this; it does not do it reliably, and a
+    keyword split across a line ("cross-" / "functional") is not a literal
+    match for an ATS. Doing it mechanically afterwards is the only way it is
+    actually guaranteed.
+
+    Only text between tags is touched - never tag internals, and never the
+    contents of <style>, <title> or an existing .nb span.
+    """
+    terms = sorted({k.strip() for k in keywords if k and k.strip()}, key=len, reverse=True)
+    if not terms:
+        return html, 0
+    pattern = re.compile("|".join(re.escape(t) for t in terms), re.IGNORECASE)
+
+    parts = re.split(r"(<[^>]*>)", html)
+    skip_depth = 0
+    in_nb = False
+    wrapped = 0
+    for index, part in enumerate(parts):
+        if part.startswith("<"):
+            tag = part.lower()
+            if tag.startswith(("<style", "<title", "<script")):
+                skip_depth += 1
+            elif tag.startswith(("</style", "</title", "</script")):
+                skip_depth = max(0, skip_depth - 1)
+            elif "class=\"nb\"" in tag:
+                in_nb = True
+            elif tag.startswith("</span"):
+                in_nb = False
+            continue
+        if skip_depth or in_nb or not part.strip():
+            continue
+
+        def _wrap(match: re.Match[str]) -> str:
+            nonlocal wrapped
+            wrapped += 1
+            return f'<span class="nb">{match.group(0)}</span>'
+
+        parts[index] = pattern.sub(_wrap, part)
+    return "".join(parts), wrapped
+
+
+def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, list[str]]:
     """Re-apply the ATS CSS invariants. Returns ``(html, notes)``."""
     notes: list[str] = []
 
@@ -198,6 +242,10 @@ def harden_html(html: str) -> tuple[str, list[str]]:
     for pattern, why in FORBIDDEN_CSS:
         if re.search(pattern, html, re.IGNORECASE | re.DOTALL):
             notes.append(f"WARNING: generated CSS reintroduces an ATS hazard - {why}")
+
+    html, wrapped = protect_keywords(html, nowrap_keywords)
+    if wrapped:
+        notes.append(f"wrapped {wrapped} protected keyword(s) in .nb")
 
     return html, notes
 
@@ -281,7 +329,7 @@ def tailor_cv(
             "Tailoring produced something that is not an HTML CV. "
             "Re-run; if it persists, check the model id in config.toml."
         )
-    html, notes = harden_html(html)
+    html, notes = harden_html(html, cfg.get("ats", "nowrap_keywords", []) or [])
     for note in notes:
         log.warning("%s", note)
 
