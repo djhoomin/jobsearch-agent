@@ -181,9 +181,9 @@ title_exclude = [
 # ---------------------------------------------------------------------------
 
 [[discover.boards]]
-company = "Weaviate"
+company = "Example Ashby Co"
 ats = "ashby"
-token = "weaviate"
+token = "examplecompany"
 tier = 1
 ind_sponsor = true
 

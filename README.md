@@ -70,16 +70,16 @@ tracker; the others take a job id back out of it.
 ```bash
 jobsearch discover --tier 1              # public ATS boards for tier-1 targets
 jobsearch status                         # what is tracked
-jobsearch score weaviate-director        # hard constraints, then the rubric
-jobsearch tailor weaviate-director       # CV -> PDF -> grounding audit -> ATS check
-jobsearch verify output/cv/CV_Weaviate.pdf
-jobsearch outreach weaviate-director     # contacts + drafts, nothing sent
-jobsearch track weaviate-director --status Applied --reason "applied via careers page"
+jobsearch score northwind-director        # hard constraints, then the rubric
+jobsearch tailor northwind-director       # CV -> PDF -> grounding audit -> ATS check
+jobsearch verify output/cv/CV_Northwind.pdf
+jobsearch outreach northwind-director     # contacts + drafts, nothing sent
+jobsearch track northwind-director --status Applied --reason "applied via careers page"
 jobsearch export                         # xlsx in your tracker's column shape
-jobsearch run https://jobs.ashbyhq.com/weaviate/10c5e3e9-...  # all of it, agentically
+jobsearch run https://jobs.ashbyhq.com/northwind/a1b2c3d4-...  # all of it, agentically
 ```
 
-Job ids accept a unique prefix (`weaviate-director`) or the posting URL.
+Job ids accept a unique prefix (`northwind-director`) or the posting URL.
 
 `--dry-run` works on every command: it prints what would happen, makes no API
 call, and writes nothing.
@@ -102,7 +102,7 @@ that 404s is reported and skipped; one bad token does not abort the sweep.
 ```bash
 jobsearch discover                        # everything configured
 jobsearch discover --tier 1 --tier 2
-jobsearch discover --company Weaviate
+jobsearch discover --company Northwind
 jobsearch discover --web                  # also run a Claude web_search pass
 jobsearch discover --web "sovereign AI leadership roles Netherlands"
 ```
@@ -115,7 +115,7 @@ silently rather than erroring.
 For a role on a site this tool will not scrape, enter it by hand:
 
 ```bash
-jobsearch add --company Hawk --title "Head of AI" \
+jobsearch add --company Northwind --title "Director of Engineering, AI" \
   --location Munich --url https://... --file jd.txt
 ```
 
@@ -170,9 +170,9 @@ The most careful stage, in three steps:
 Then the PDF is rendered with headless Chrome and run through the ATS verifier.
 
 ```bash
-jobsearch tailor weaviate-director
-jobsearch tailor weaviate-director --stream     # watch it generate
-jobsearch tailor weaviate-director --no-render  # HTML only
+jobsearch tailor northwind-director
+jobsearch tailor northwind-director --stream     # watch it generate
+jobsearch tailor northwind-director --no-render  # HTML only
 ```
 
 Output lands in `output/cv/`. Your source documents are opened read-only and
@@ -196,7 +196,7 @@ learned from a real failure on this CV:
 
 ```bash
 jobsearch verify ../cv.pdf                                  # your base CV: PASS
-jobsearch verify output/cv/CV_Weaviate.pdf --job-id weaviate-director
+jobsearch verify output/cv/CV_Northwind.pdf --job-id northwind-director
 jobsearch verify some.pdf --jd-file jd.txt --json
 ```
 
@@ -214,8 +214,8 @@ LinkedIn **search URL you click yourself**, and drafts a connection note
 the specific posting, and constrained by the same red-list guardrails.
 
 ```bash
-jobsearch outreach weaviate-director
-jobsearch outreach weaviate-director --gmail-draft --to person@company.com
+jobsearch outreach northwind-director
+jobsearch outreach northwind-director --gmail-draft --to person@example.com
 ```
 
 `--gmail-draft` creates a Gmail **draft**. There is no send path in this
@@ -239,8 +239,8 @@ any active state ─> Rejected / Withdrawn / Parked      Rejected ─> Parked (r
 
 ```bash
 jobsearch status --min-score 4.0 --status Applied
-jobsearch show weaviate-director
-jobsearch track weaviate-director --status Interviewing --reason "HM call booked" --history
+jobsearch show northwind-director
+jobsearch track northwind-director --status Interviewing --reason "HM call booked" --history
 jobsearch export
 ```
 
@@ -258,8 +258,8 @@ point. It is instructed to stop when a hard constraint fails, to report every
 ungrounded claim verbatim, and to say plainly when a role is not worth pursuing.
 
 ```bash
-jobsearch run https://jobs.ashbyhq.com/weaviate/10c5e3e9-...
-jobsearch run weaviate-director --instruction "Aim outreach at the founder, not the posting"
+jobsearch run https://jobs.ashbyhq.com/northwind/a1b2c3d4-...
+jobsearch run northwind-director --instruction "Aim outreach at the founder, not the posting"
 ```
 
 ---

@@ -57,8 +57,8 @@ class TestConfig:
             Weights(buyer=0.5, role_fit=0.5, company=0.5, domain=0.5, talent=0.5)
 
     def test_board_lookup_is_case_insensitive(self, cfg):
-        assert cfg.board_for("weaviate") is not None
-        assert cfg.board_for("WEAVIATE").company == "Weaviate"
+        assert cfg.board_for("example ashby co") is not None
+        assert cfg.board_for("EXAMPLE ASHBY CO").company == "Example Ashby Co"
 
     def test_unknown_company_returns_none(self, cfg):
         assert cfg.board_for("Nonexistent Corp") is None
