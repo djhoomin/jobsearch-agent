@@ -470,6 +470,35 @@ class Tracker:
                 ),
             )
 
+    def get_contact(self, contact_id: int) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT * FROM contact WHERE id = ?", (contact_id,)
+        ).fetchone()
+
+    def update_contact(self, contact_id: int, **fields: Any) -> None:
+        """Edit one contact in place, by row id.
+
+        Contacts arrive two ways - inferred by the outreach stage, or typed in
+        by hand - and both need correcting: an inferred one names a role rather
+        than a person until you find out who holds it.
+        """
+        allowed = {"name", "title", "rationale", "search_url"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise TrackerError(f"Cannot set unknown field(s): {', '.join(sorted(unknown))}")
+        if not fields:
+            return
+        assignments = ", ".join(f"{k} = ?" for k in fields)
+        with self._tx() as conn:
+            conn.execute(
+                f"UPDATE contact SET {assignments} WHERE id = ?",
+                [*fields.values(), contact_id],
+            )
+
+    def delete_contact(self, contact_id: int) -> None:
+        with self._tx() as conn:
+            conn.execute("DELETE FROM contact WHERE id = ?", (contact_id,))
+
     def contacts(self, job_id: str) -> list[sqlite3.Row]:
         return list(
             self._conn.execute(

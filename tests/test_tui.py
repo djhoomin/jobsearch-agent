@@ -1192,8 +1192,106 @@ class TestWholeCompanyContact:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 await pilot.press("enter"); await pilot.pause()
-                await pilot.press("p"); await pilot.pause()
+                await pilot.press("p"); await pilot.pause()   # contacts manager
+                await pilot.press("a"); await pilot.pause()   # the add form
                 box = app.screen.query_one("#c-all", Checkbox)
                 assert box.value is False, "must be opt-in"
+
+        asyncio.run(scenario())
+
+
+class TestEditContacts:
+    """Contacts arrive inferred or hand-typed; both need correcting."""
+
+    def _one(self, cfg):
+        from jobsearch.models import Contact, OutreachDraft
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_outreach(
+                OutreachDraft(
+                    job_id=job_id,
+                    contacts=[Contact(title="VP Engineering", linkedin_search_url="https://x.test/1")],
+                )
+            )
+            return job_id, tracker.contacts(job_id)[0]["id"]
+
+    def test_an_inferred_contact_can_be_named(self, cfg):
+        """The outreach stage names a role; you find out who holds it."""
+        from jobsearch.tui import update_contact_blocking
+
+        job_id, contact_id = self._one(cfg)
+        message = update_contact_blocking(
+            cfg, contact_id, name="Kayne Putman", title="Director, Solutions Engineering",
+            url="https://linkedin.test/kayne",
+        )
+        assert "Kayne Putman" in message
+        with Tracker.from_config(cfg) as tracker:
+            row = tracker.contacts(job_id)[0]
+        assert row["name"] == "Kayne Putman"
+        assert row["search_url"] == "https://linkedin.test/kayne"
+
+    def test_editing_does_not_create_a_second_contact(self, cfg):
+        from jobsearch.tui import update_contact_blocking
+
+        job_id, contact_id = self._one(cfg)
+        update_contact_blocking(cfg, contact_id, name="A Person")
+        with Tracker.from_config(cfg) as tracker:
+            assert len(tracker.contacts(job_id)) == 1
+
+    def test_a_contact_cannot_be_emptied(self, cfg):
+        from jobsearch.tui import update_contact_blocking
+
+        _, contact_id = self._one(cfg)
+        with pytest.raises(ValueError, match="name or a title"):
+            update_contact_blocking(cfg, contact_id, name="  ", title="  ")
+
+    def test_removing_one(self, cfg):
+        from jobsearch.tui import delete_contact_blocking
+
+        job_id, contact_id = self._one(cfg)
+        assert "VP Engineering" in delete_contact_blocking(cfg, contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.contacts(job_id) == []
+
+    def test_the_tracker_refuses_an_unknown_field(self, cfg):
+        from jobsearch.tracker import TrackerError
+
+        _, contact_id = self._one(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            with pytest.raises(TrackerError, match="unknown field"):
+                tracker.update_contact(contact_id, nickname="K")
+
+    def test_p_opens_the_manager_and_enter_opens_the_editor(self, cfg):
+        self._one(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter"); await pilot.pause()
+                await pilot.press("p"); await pilot.pause()
+                assert type(app.screen).__name__ == "ContactsScreen"
+                await pilot.press("enter"); await pilot.pause()
+                assert type(app.screen).__name__ == "ContactScreen"
+                from textual.widgets import Input
+                assert app.screen.query_one("#c-title", Input).value == "VP Engineering"
+
+        asyncio.run(scenario())
+
+    def test_the_edit_form_has_no_whole_company_checkbox(self, cfg):
+        """Applying an edit to every role would be a different operation."""
+        from textual.widgets import Checkbox
+
+        self._one(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter"); await pilot.pause()
+                await pilot.press("p"); await pilot.pause()
+                await pilot.press("enter"); await pilot.pause()
+                assert not app.screen.query(Checkbox)
 
         asyncio.run(scenario())

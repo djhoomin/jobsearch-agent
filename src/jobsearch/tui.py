@@ -431,6 +431,42 @@ def contact_links_text(cfg: Config, job_id: str) -> str:
     return "\n".join(lines)
 
 
+def update_contact_blocking(
+    cfg: Config, contact_id: int, *, name: str, title: str = "", url: str = "", rationale: str = ""
+) -> str:
+    """Edit an existing contact."""
+    from .tracker import Tracker
+
+    name, title = name.strip(), title.strip()
+    if not name and not title:
+        raise ValueError("a contact needs a name or a title")
+    with Tracker.from_config(cfg) as tracker:
+        tracker.update_contact(
+            contact_id, name=name, title=title,
+            rationale=rationale.strip(), search_url=url.strip(),
+        )
+    return f"contact updated: {name or title}"
+
+
+def delete_contact_blocking(cfg: Config, contact_id: int) -> str:
+    """Remove one contact."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        row = tracker.get_contact(contact_id)
+        label = str(_get(row, "name") or _get(row, "title", "contact")) if row else "contact"
+        tracker.delete_contact(contact_id)
+    return f"contact removed: {label}"
+
+
+def contacts_for(cfg: Config, job_id: str) -> list[Any]:
+    """Contact rows for one role."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        return tracker.contacts(tracker.resolve_job_id(job_id))
+
+
 def candidate_cv_files(cfg: Config) -> list[Path]:
     """CVs already on disk: alongside the base CV, and in the output folder.
 
@@ -1198,19 +1234,30 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("ctrl+s", "save", "Save"),
         ]
 
-        def __init__(self, cfg: Config, job_id: str) -> None:
+        def __init__(self, cfg: Config, job_id: str, contact: Any = None) -> None:
             super().__init__()
             self.cfg = cfg
             self.job_id = job_id
+            self.contact = contact
 
         def compose(self) -> ComposeResult:
+            editing = self.contact is not None
+            verb = "Edit" if editing else "Add a"
             with Vertical(id="newrole"):
-                yield Static("[b]Add a contact[/]  [dim]name or title required · ctrl+s to save[/]")
-                yield Input(placeholder="name", id="c-name")
-                yield Input(placeholder="title / role", id="c-title")
-                yield Input(placeholder="LinkedIn or email", id="c-url")
-                yield Input(placeholder="how you know them, or why they matter", id="c-why")
-                yield Checkbox("Apply to every live role at this company", id="c-all")
+                yield Static(f"[b]{verb} contact[/]  [dim]name or title required · ctrl+s to save[/]")
+                def prefill(field: str) -> str:
+                    return str(_get(self.contact, field, "")) if editing else ""
+
+                yield Input(value=prefill("name"), placeholder="name", id="c-name")
+                yield Input(value=prefill("title"), placeholder="title / role", id="c-title")
+                yield Input(value=prefill("search_url"), placeholder="LinkedIn or email", id="c-url")
+                yield Input(
+                    value=prefill("rationale"),
+                    placeholder="how you know them, or why they matter",
+                    id="c-why",
+                )
+                if not editing:
+                    yield Checkbox("Apply to every live role at this company", id="c-all")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -1221,12 +1268,19 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 return self.query_one(f"#c-{name}", Input).value
 
             try:
-                message = add_contact_blocking(
-                    self.cfg, self.job_id,
-                    name=value("name"), title=value("title"),
-                    url=value("url"), rationale=value("why"),
-                    whole_company=self.query_one("#c-all", Checkbox).value,
-                )
+                if self.contact is not None:
+                    message = update_contact_blocking(
+                        self.cfg, int(_get(self.contact, "id", 0)),
+                        name=value("name"), title=value("title"),
+                        url=value("url"), rationale=value("why"),
+                    )
+                else:
+                    message = add_contact_blocking(
+                        self.cfg, self.job_id,
+                        name=value("name"), title=value("title"),
+                        url=value("url"), rationale=value("why"),
+                        whole_company=self.query_one("#c-all", Checkbox).value,
+                    )
             except Exception as exc:  # noqa: BLE001 - shown on the role page
                 self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
                 return
@@ -1234,6 +1288,80 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def action_cancel(self) -> None:
             self.dismiss(None)
+
+    class ContactsScreen(ModalScreen):  # type: ignore[misc]
+        """List the contacts on a role: add, edit or remove one."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Back"),
+            Binding("a", "add", "Add"),
+            Binding("d", "remove", "Remove"),
+        ]
+
+        def __init__(self, cfg: Config, job_id: str) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.job_id = job_id
+            self.rows: list[Any] = []
+            self.message: str | None = None
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="picker"):
+                yield Static(
+                    "[b]Contacts[/]  [dim]enter edit · a add · d remove · esc back[/]"
+                )
+                yield OptionList(id="contactlist")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.reload()
+            self.query_one("#contactlist", OptionList).focus()
+
+        def reload(self) -> None:
+            self.rows = contacts_for(self.cfg, self.job_id)
+            listing = self.query_one("#contactlist", OptionList)
+            listing.clear_options()
+            for row in self.rows:
+                name = str(_get(row, "name", "")).strip()
+                title = str(_get(row, "title", "")).strip()
+                listing.add_option(f"{name} — {title}" if name and title else (name or title))
+            if not self.rows:
+                listing.add_option("(none yet — press a)")
+            else:
+                # Preselect, so enter edits the first contact without an
+                # arrow-key press first. `highlighted` is None until set.
+                listing.highlighted = 0
+
+        def selected(self) -> Any | None:
+            index = self.query_one("#contactlist", OptionList).highlighted
+            if index is None or not self.rows or index >= len(self.rows):
+                return None
+            return self.rows[index]
+
+        def on_option_list_option_selected(self, _event: Any) -> None:
+            row = self.selected()
+            if row is not None:
+                self.app.push_screen(
+                    ContactScreen(self.cfg, self.job_id, row), self.after_change
+                )
+
+        def action_add(self) -> None:
+            self.app.push_screen(ContactScreen(self.cfg, self.job_id), self.after_change)
+
+        def action_remove(self) -> None:
+            row = self.selected()
+            if row is None:
+                return
+            self.message = delete_contact_blocking(self.cfg, int(_get(row, "id", 0)))
+            self.reload()
+
+        def after_change(self, message: str | None) -> None:
+            if message:
+                self.message = message
+            self.reload()
+
+        def action_cancel(self) -> None:
+            self.dismiss(self.message)
 
     class AttachCvScreen(ModalScreen):  # type: ignore[misc]
         """Pick a CV already on disk, or type a path."""
@@ -1474,7 +1602,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.app.push_screen(NoteScreen(self.cfg, self.job_id), self.after_attach)
 
         def action_add_contact(self) -> None:
-            self.app.push_screen(ContactScreen(self.cfg, self.job_id), self.after_attach)
+            self.app.push_screen(ContactsScreen(self.cfg, self.job_id), self.after_attach)
 
         def action_attach_cv(self) -> None:
             self.app.push_screen(AttachCvScreen(self.cfg, self.job_id), self.after_attach)
