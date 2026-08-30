@@ -35,6 +35,18 @@ For the tests: `pip install -e '.[dev]' && pytest`.
 ### Configure
 
 ```bash
+jobsearch setup
+```
+
+A guided first run: it finds your source documents in the parent directory,
+asks for your details and hard constraints, checks for Chrome and Claude
+credentials, and writes `config.local.toml`. Press Enter to accept any
+`[default]`. It fills in the committed template, so every explanatory
+comment survives into your own config.
+
+Prefer to do it by hand:
+
+```bash
 cp config.example.toml config.local.toml
 ```
 
@@ -61,6 +73,45 @@ except the four Claude-backed stages (`score`, `tailor`, `outreach`, `run`)
 works with no credentials at all — including the entire ATS verifier.
 
 ---
+
+## The TUI
+
+```bash
+pip install -e '.[tui]'
+jobsearch tui
+```
+
+A pipeline browser: every role in one table, the selected one expanded below,
+and a key per stage. It calls exactly the same functions as the subcommands, so
+behaviour cannot drift between the two.
+
+```
+┌ jobsearch ─────────────────────────────────────────────┐
+│ Pipeline (14)         [/] filter                       │
+├────────────────────────────────────────────────────────┤
+│ ▸ Northwind    Dir. Eng, AI      4.15  ● Applied       │
+│   Contoso AI   Head of AI        3.90  ○ Not started   │
+│   Initech      Dir. Research     3.55  ◐ Scored        │
+│   Example Co   VP AI             elim  ✗ Eliminated    │
+├─ Northwind — Director of Engineering, AI ──────────────┤
+│ score 4.15   buyer 4 │ role_fit 5 │ company 4 │ ...    │
+│ cv    output/cv/CV_Northwind.pdf                       │
+└────────────────────────────────────────────────────────┘
+```
+
+| Key | Does |
+|---|---|
+| `s` | Score the selected role |
+| `t` | Tailor a CV for it |
+| `o` | Draft outreach |
+| `v` | Run the ATS verifier on its CV |
+| `/` | Filter by company or title (`esc` clears) |
+| `r` | Reload from the tracker |
+| `q` | Quit |
+
+Stages run on a worker thread, so a long tailoring call does not freeze the
+table, and results stream into the log pane at the bottom. `--dry-run` works
+here too: the app says so on start and makes no API calls.
 
 ## The pipeline
 

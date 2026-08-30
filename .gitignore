@@ -28,3 +28,6 @@ token.json
 *token*.json
 .env
 .secrets/
+
+# macOS
+.DS_Store

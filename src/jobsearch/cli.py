@@ -565,6 +565,28 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def cmd_setup(cfg: Config | None, args: argparse.Namespace) -> int:
+    """Guided first run. Deliberately does not require an existing config."""
+    from .setup_wizard import SetupAborted, default_repo_root, run_setup
+
+    root = Path(args.config).expanduser().resolve().parent if args.config else default_repo_root()
+    try:
+        return run_setup(root, force=args.force)
+    except SetupAborted as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+def cmd_tui(cfg: Config, args: argparse.Namespace) -> int:
+    from .tui import run_tui
+
+    try:
+        return run_tui(cfg, dry_run=args.dry_run)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     """Check that everything the tool depends on is actually present."""
     import os
@@ -852,6 +874,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_run)
 
     # doctor
+    p = sub.add_parser(
+        "setup",
+        help="Guided first-run setup: write config.local.toml",
+        description=(
+            "Interactively create config.local.toml from config.example.toml. "
+            "Finds your source documents, asks for your details and hard "
+            "constraints, and checks Chrome and Claude credentials."
+        ),
+    )
+    p.add_argument("--force", action="store_true", help="Overwrite an existing config.local.toml without asking")
+    p.set_defaults(func=cmd_setup, needs_config=False)
+
+    p = sub.add_parser(
+        "tui",
+        help="Interactive pipeline browser",
+        description=(
+            "A terminal UI over the pipeline: pick a role and run a stage on it. "
+            "Needs the optional extra: pip install -e '.[tui]'"
+        ),
+    )
+    p.set_defaults(func=cmd_tui)
+
     p = sub.add_parser("doctor", help="Check config, source documents, Chrome, credentials")
     p.add_argument(
         "--boards",
@@ -872,11 +916,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    try:
-        cfg = load_config(args.config)
-    except ConfigError as exc:
-        print(f"config error: {exc}", file=sys.stderr)
-        return 2
+    # `setup` writes the config, so it must run before one exists.
+    if getattr(args, "needs_config", True):
+        try:
+            cfg = load_config(args.config)
+        except ConfigError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            print("run `jobsearch setup` to create one", file=sys.stderr)
+            return 2
+    else:
+        cfg = None
 
     try:
         return args.func(cfg, args)
