@@ -327,26 +327,64 @@ def add_note_blocking(cfg: Config, job_id: str, body: str) -> str:
 
 
 def add_contact_blocking(
-    cfg: Config, job_id: str, *, name: str, title: str = "", url: str = "", rationale: str = ""
+    cfg: Config,
+    job_id: str,
+    *,
+    name: str,
+    title: str = "",
+    url: str = "",
+    rationale: str = "",
+    whole_company: bool = False,
 ) -> str:
-    """Append a contact you found yourself, alongside any inferred ones."""
+    """Append a contact you found yourself, alongside any inferred ones.
+
+    With ``whole_company``, the contact is added to every live role at the same
+    employer - a hiring manager is a fact about the company, not about one
+    posting. Dismissed roles are skipped: you already said no to those, and a
+    company like Mistral can have thirty of them.
+    """
     from .models import Contact
     from .tracker import Tracker
 
     name = name.strip()
-    if not name and not title.strip():
+    title = title.strip()
+    if not name and not title:
         raise ValueError("a contact needs a name or a title")
+
+    contact = Contact(
+        title=title, name=name, rationale=rationale.strip(), linkedin_search_url=url.strip()
+    )
+
     with Tracker.from_config(cfg) as tracker:
-        tracker.add_contact(
-            tracker.resolve_job_id(job_id),
-            Contact(
-                title=title.strip(),
-                name=name,
-                rationale=rationale.strip(),
-                linkedin_search_url=url.strip(),
-            ),
-        )
-    return f"contact added: {name or title.strip()}"
+        job_id = tracker.resolve_job_id(job_id)
+        row = tracker.get_job(job_id)
+        company = str(_get(row, "company", ""))
+
+        targets = [job_id]
+        if whole_company and company:
+            targets = [
+                str(_get(other, "job_id", ""))
+                for other in tracker.list_jobs(company=company)
+                if str(_get(other, "status", "")) != DISMISSED_STATUS.value
+            ] or [job_id]
+
+        added = 0
+        for target in targets:
+            existing = {
+                (str(_get(c, "name", "")), str(_get(c, "title", "")))
+                for c in tracker.contacts(target)
+            }
+            if (name, title) in existing:
+                continue
+            tracker.add_contact(target, contact)
+            added += 1
+
+    label = name or title
+    if not whole_company:
+        return f"contact added: {label}"
+    skipped = len(targets) - added
+    note = f", {skipped} already had them" if skipped else ""
+    return f"contact added: {label} → {added} role(s) at {company}{note}"
 
 
 CLIPBOARD_COMMANDS: tuple[tuple[str, ...], ...] = (
@@ -633,7 +671,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
     from textual.binding import Binding
     from textual.containers import Vertical, VerticalScroll
     from textual.widgets import (
-        DataTable, Footer, Header, Input, OptionList, RichLog, Static, TextArea,
+        Checkbox, DataTable, Footer, Header, Input, OptionList, RichLog, Static,
+        TextArea,
     )
 
     class JobSearchTUI(App):  # type: ignore[misc]
@@ -1171,6 +1210,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 yield Input(placeholder="title / role", id="c-title")
                 yield Input(placeholder="LinkedIn or email", id="c-url")
                 yield Input(placeholder="how you know them, or why they matter", id="c-why")
+                yield Checkbox("Apply to every live role at this company", id="c-all")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -1185,6 +1225,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                     self.cfg, self.job_id,
                     name=value("name"), title=value("title"),
                     url=value("url"), rationale=value("why"),
+                    whole_company=self.query_one("#c-all", Checkbox).value,
                 )
             except Exception as exc:  # noqa: BLE001 - shown on the role page
                 self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")

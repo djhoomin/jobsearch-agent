@@ -1120,3 +1120,80 @@ class TestProviderInSettingsScreen:
                 assert app.cfg.raw["claude"]["provider"] == "openai_compatible"
 
         asyncio.run(scenario())
+
+
+class TestWholeCompanyContact:
+    """A hiring manager is a fact about the company, not about one posting."""
+
+    def _company(self, cfg, name="Northwind", n=3):
+        return [seed(cfg, company=name, title=f"Role {i}") for i in range(n)]
+
+    def test_it_applies_to_every_live_role_at_the_company(self, cfg):
+        from jobsearch.tui import add_contact_blocking
+
+        ids = self._company(cfg)
+        seed(cfg, company="Other Co", title="Unrelated")
+        message = add_contact_blocking(
+            cfg, ids[0], name="A Person", title="CTO", whole_company=True
+        )
+        assert "3 role(s) at Northwind" in message
+        with Tracker.from_config(cfg) as tracker:
+            for job_id in ids:
+                assert any(str(c["name"]) == "A Person" for c in tracker.contacts(job_id))
+
+    def test_it_does_not_touch_other_companies(self, cfg):
+        from jobsearch.tui import add_contact_blocking
+
+        ids = self._company(cfg)
+        other = seed(cfg, company="Other Co", title="Unrelated")
+        add_contact_blocking(cfg, ids[0], name="A Person", whole_company=True)
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.contacts(other) == []
+
+    def test_dismissed_roles_are_skipped(self, cfg):
+        """You already said no to those, and a company can have thirty."""
+        from jobsearch.tui import add_contact_blocking, dismiss_blocking
+
+        ids = self._company(cfg)
+        dismiss_blocking(cfg, ids[2])
+        message = add_contact_blocking(cfg, ids[0], name="A Person", whole_company=True)
+        assert "2 role(s)" in message
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.contacts(ids[2]) == []
+
+    def test_it_does_not_duplicate_an_existing_contact(self, cfg):
+        from jobsearch.tui import add_contact_blocking
+
+        ids = self._company(cfg)
+        add_contact_blocking(cfg, ids[1], name="A Person", title="CTO")
+        message = add_contact_blocking(
+            cfg, ids[0], name="A Person", title="CTO", whole_company=True
+        )
+        assert "1 already had them" in message
+        with Tracker.from_config(cfg) as tracker:
+            names = [str(c["name"]) for c in tracker.contacts(ids[1])]
+        assert names.count("A Person") == 1
+
+    def test_without_the_flag_only_one_role_gets_it(self, cfg):
+        from jobsearch.tui import add_contact_blocking
+
+        ids = self._company(cfg)
+        add_contact_blocking(cfg, ids[0], name="A Person")
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.contacts(ids[1]) == []
+
+    def test_the_checkbox_exists_on_the_contact_screen(self, cfg):
+        from textual.widgets import Checkbox
+
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter"); await pilot.pause()
+                await pilot.press("p"); await pilot.pause()
+                box = app.screen.query_one("#c-all", Checkbox)
+                assert box.value is False, "must be opt-in"
+
+        asyncio.run(scenario())
