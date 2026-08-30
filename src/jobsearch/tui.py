@@ -459,6 +459,94 @@ def delete_contact_blocking(cfg: Config, contact_id: int) -> str:
     return f"contact removed: {label}"
 
 
+def share_contact_blocking(cfg: Config, job_id: str, contact_id: int) -> str:
+    """Copy one contact to every live role at the same employer.
+
+    An upsert, not an insert: a role that already knows this person has their
+    details brought into line instead of gaining a second, stale entry. That is
+    what makes editing and sharing compose - correct someone once, then push
+    the correction across the company.
+
+    Copies are linked by ``group_id`` rather than matched on their text,
+    because the rename that prompts a share is exactly what breaks a text
+    match. Copies made before the group existed are adopted by name or title
+    on the first share. Dismissed roles are skipped.
+    """
+    from .models import Contact
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        source = tracker.get_contact(contact_id)
+        if source is None:
+            raise ValueError(f"no contact with id {contact_id}")
+
+        group_id = _get(source, "group_id") or contact_id
+        if not _get(source, "group_id"):
+            tracker.update_contact(contact_id, group_id=group_id)
+
+        name = str(_get(source, "name", "")).strip()
+        title = str(_get(source, "title", "")).strip()
+        fields = {
+            "name": name,
+            "title": title,
+            "rationale": str(_get(source, "rationale", "")),
+            "search_url": str(_get(source, "search_url", "")),
+        }
+        company = str(_get(tracker.get_job(job_id), "company", ""))
+        if not company:
+            raise ValueError("this role has no company to share across")
+
+        legacy_key = (name or title).lower()
+        added = updated = 0
+        for other in tracker.list_jobs(company=company):
+            other_id = str(_get(other, "job_id", ""))
+            if str(_get(other, "status", "")) == DISMISSED_STATUS.value:
+                continue
+
+            rows = tracker.contacts(other_id)
+            match = next((c for c in rows if _get(c, "group_id") == group_id), None)
+            if match is None:
+                # Adopt a copy made before this contact had a group.
+                match = next(
+                    (
+                        c
+                        for c in rows
+                        if _get(c, "group_id") is None
+                        and (
+                            str(_get(c, "name", "")).strip()
+                            or str(_get(c, "title", "")).strip()
+                        ).lower()
+                        == legacy_key
+                    ),
+                    None,
+                )
+
+            if match is None:
+                tracker.add_contact(
+                    other_id,
+                    Contact(
+                        title=title, name=name,
+                        rationale=fields["rationale"],
+                        linkedin_search_url=fields["search_url"],
+                    ),
+                    group_id=group_id,
+                )
+                added += 1
+            elif int(_get(match, "id", 0)) != contact_id:
+                tracker.update_contact(int(_get(match, "id", 0)), group_id=group_id, **fields)
+                updated += 1
+
+    label = name or title
+    bits = []
+    if added:
+        bits.append(f"{added} added")
+    if updated:
+        bits.append(f"{updated} updated")
+    detail = ", ".join(bits) or "already up to date everywhere"
+    return f"{label} across {company}: {detail}"
+
+
 def contacts_for(cfg: Config, job_id: str) -> list[Any]:
     """Contact rows for one role."""
     from .tracker import Tracker
@@ -1296,6 +1384,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("escape", "cancel", "Back"),
             Binding("a", "add", "Add"),
             Binding("d", "remove", "Remove"),
+            Binding("c", "share", "Apply to company"),
         ]
 
         def __init__(self, cfg: Config, job_id: str) -> None:
@@ -1308,7 +1397,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def compose(self) -> ComposeResult:
             with Vertical(id="picker"):
                 yield Static(
-                    "[b]Contacts[/]  [dim]enter edit · a add · d remove · esc back[/]"
+                    "[b]Contacts[/]  [dim]enter edit · a add · c apply to company · "
+                    "d remove · esc back[/]"
                 )
                 yield OptionList(id="contactlist")
             yield Footer()
@@ -1347,6 +1437,18 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def action_add(self) -> None:
             self.app.push_screen(ContactScreen(self.cfg, self.job_id), self.after_change)
+
+        def action_share(self) -> None:
+            row = self.selected()
+            if row is None:
+                return
+            try:
+                self.message = share_contact_blocking(
+                    self.cfg, self.job_id, int(_get(row, "id", 0))
+                )
+            except Exception as exc:  # noqa: BLE001 - reported on the role page
+                self.message = f"[red]{type(exc).__name__}:[/] {exc}"
+            self.reload()
 
         def action_remove(self) -> None:
             row = self.selected()

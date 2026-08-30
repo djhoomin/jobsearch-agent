@@ -162,7 +162,13 @@ class Tracker:
     # -- jobs --------------------------------------------------------------
     # Columns added after the first release. `CREATE TABLE IF NOT EXISTS` will
     # not add a column to a database that already exists, so add them here.
-    ADDED_COLUMNS: tuple[tuple[str, str], ...] = (("job", "claims_json TEXT"),)
+    ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
+        ("job", "claims_json TEXT"),
+        # Links copies of one person across several roles at an employer, so a
+        # later rename still finds them. Matching on name or title cannot
+        # survive the rename that most often prompts the copy.
+        ("contact", "group_id INTEGER"),
+    )
 
     def _add_missing_columns(self) -> None:
         for table, definition in self.ADDED_COLUMNS:
@@ -450,16 +456,16 @@ class Tracker:
         ).fetchall()
         return {str(r["job_id"]) for r in rows}
 
-    def add_contact(self, job_id: str, contact: Contact) -> None:
+    def add_contact(self, job_id: str, contact: Contact, group_id: int | None = None) -> int:
         """Append one contact, keeping the existing ones.
 
         `save_contacts` replaces the whole set because a draft owns its
         contacts; a contact you found yourself has to be additive.
         """
         with self._tx() as conn:
-            conn.execute(
-                "INSERT INTO contact (job_id, name, title, rationale, search_url, created_at)"
-                " VALUES (?,?,?,?,?,?)",
+            cursor = conn.execute(
+                "INSERT INTO contact (job_id, name, title, rationale, search_url,"
+                " created_at, group_id) VALUES (?,?,?,?,?,?,?)",
                 (
                     job_id,
                     contact.name,
@@ -467,8 +473,10 @@ class Tracker:
                     contact.rationale,
                     contact.linkedin_search_url,
                     _now(),
+                    group_id,
                 ),
             )
+            return int(cursor.lastrowid or 0)
 
     def get_contact(self, contact_id: int) -> sqlite3.Row | None:
         return self._conn.execute(
@@ -482,7 +490,7 @@ class Tracker:
         by hand - and both need correcting: an inferred one names a role rather
         than a person until you find out who holds it.
         """
-        allowed = {"name", "title", "rationale", "search_url"}
+        allowed = {"name", "title", "rationale", "search_url", "group_id"}
         unknown = set(fields) - allowed
         if unknown:
             raise TrackerError(f"Cannot set unknown field(s): {', '.join(sorted(unknown))}")

@@ -1295,3 +1295,154 @@ class TestEditContacts:
                 assert not app.screen.query(Checkbox)
 
         asyncio.run(scenario())
+
+
+class TestShareContactAcrossCompany:
+    """Editing and sharing have to compose: correct someone once, then push
+    the correction to every role at that employer.
+    """
+
+    def _setup(self, cfg, n=3):
+        from jobsearch.models import Contact
+
+        ids = [seed(cfg, company="Northwind", title=f"Role {i}") for i in range(n)]
+        with Tracker.from_config(cfg) as tracker:
+            tracker.add_contact(ids[0], Contact(title="VP Engineering"))
+            contact_id = tracker.contacts(ids[0])[0]["id"]
+        return ids, contact_id
+
+    def test_it_copies_to_the_other_roles(self, cfg):
+        from jobsearch.tui import share_contact_blocking
+
+        ids, contact_id = self._setup(cfg)
+        assert "2 added" in share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            for job_id in ids[1:]:
+                assert [c["title"] for c in tracker.contacts(job_id)] == ["VP Engineering"]
+
+    def test_an_edit_then_a_share_updates_rather_than_duplicating(self, cfg):
+        """The exact flow: an inferred role name, later given a person."""
+        from jobsearch.tui import share_contact_blocking, update_contact_blocking
+
+        ids, contact_id = self._setup(cfg)
+        share_contact_blocking(cfg, ids[0], contact_id)
+        update_contact_blocking(cfg, contact_id, name="Kayne Putman", title="Director, SE")
+        message = share_contact_blocking(cfg, ids[0], contact_id)
+
+        assert "2 updated" in message
+        with Tracker.from_config(cfg) as tracker:
+            rows = tracker.contacts(ids[1])
+        assert len(rows) == 1, "must update in place, not add a second entry"
+        assert rows[0]["name"] == "Kayne Putman"
+
+    def test_sharing_twice_changes_nothing_further(self, cfg):
+        from jobsearch.tui import share_contact_blocking
+
+        ids, contact_id = self._setup(cfg)
+        share_contact_blocking(cfg, ids[0], contact_id)
+        share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            assert len(tracker.contacts(ids[1])) == 1
+
+    def test_dismissed_roles_are_skipped(self, cfg):
+        from jobsearch.tui import dismiss_blocking, share_contact_blocking
+
+        ids, contact_id = self._setup(cfg)
+        dismiss_blocking(cfg, ids[2])
+        assert "1 added" in share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.contacts(ids[2]) == []
+
+    def test_other_companies_are_untouched(self, cfg):
+        from jobsearch.tui import share_contact_blocking
+
+        ids, contact_id = self._setup(cfg)
+        other = seed(cfg, company="Other Co", title="Unrelated")
+        share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.contacts(other) == []
+
+    def test_a_missing_contact_is_a_clear_error(self, cfg):
+        from jobsearch.tui import share_contact_blocking
+
+        with pytest.raises(ValueError, match="no contact with id"):
+            share_contact_blocking(cfg, seed(cfg), 999999)
+
+    def test_c_is_bound_on_the_contacts_manager(self, cfg):
+        self._setup(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter"); await pilot.pause()
+                await pilot.press("p"); await pilot.pause()
+                assert "c" in set(app.screen.active_bindings)
+
+        asyncio.run(scenario())
+
+
+class TestSharedContactsSurviveRenames:
+    """The rename is exactly what prompts a share, so it must not break the
+    link between copies. Text matching cannot do that; a group id can.
+    """
+
+    def _two_roles(self, cfg):
+        from jobsearch.models import Contact
+
+        ids = [seed(cfg, company="Northwind", title=f"Role {i}") for i in range(2)]
+        with Tracker.from_config(cfg) as tracker:
+            tracker.add_contact(ids[0], Contact(title="VP Engineering"))
+            return ids, tracker.contacts(ids[0])[0]["id"]
+
+    def test_a_rename_then_a_share_updates_the_copy(self, cfg):
+        from jobsearch.tui import share_contact_blocking, update_contact_blocking
+
+        ids, contact_id = self._two_roles(cfg)
+        share_contact_blocking(cfg, ids[0], contact_id)
+        update_contact_blocking(cfg, contact_id, name="Kayne Putman", title="Director, SE")
+        assert "1 updated" in share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            rows = tracker.contacts(ids[1])
+        assert len(rows) == 1
+        assert rows[0]["name"] == "Kayne Putman"
+
+    def test_repeated_renames_never_accumulate_copies(self, cfg):
+        from jobsearch.tui import share_contact_blocking, update_contact_blocking
+
+        ids, contact_id = self._two_roles(cfg)
+        for name in ("First Name", "Second Name", "Third Name"):
+            update_contact_blocking(cfg, contact_id, name=name, title="Director, SE")
+            share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            rows = tracker.contacts(ids[1])
+        assert len(rows) == 1, f"accumulated {len(rows)} copies"
+        assert rows[0]["name"] == "Third Name"
+
+    def test_a_copy_made_before_group_ids_is_adopted(self, cfg):
+        """Contacts already in the database predate the group column."""
+        from jobsearch.models import Contact
+        from jobsearch.tui import share_contact_blocking
+
+        ids, contact_id = self._two_roles(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.add_contact(ids[1], Contact(title="VP Engineering"))  # no group
+        assert "1 updated" in share_contact_blocking(cfg, ids[0], contact_id)
+        with Tracker.from_config(cfg) as tracker:
+            rows = tracker.contacts(ids[1])
+        assert len(rows) == 1, "the pre-existing copy should be adopted, not duplicated"
+        assert rows[0]["group_id"] == contact_id
+
+    def test_two_different_people_stay_separate(self, cfg):
+        from jobsearch.models import Contact
+        from jobsearch.tui import share_contact_blocking
+
+        ids, first = self._two_roles(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.add_contact(ids[0], Contact(title="Head of Talent"))
+            second = [c["id"] for c in tracker.contacts(ids[0]) if c["title"] == "Head of Talent"][0]
+        share_contact_blocking(cfg, ids[0], first)
+        share_contact_blocking(cfg, ids[0], second)
+        with Tracker.from_config(cfg) as tracker:
+            titles = sorted(str(c["title"]) for c in tracker.contacts(ids[1]))
+        assert titles == ["Head of Talent", "VP Engineering"]
