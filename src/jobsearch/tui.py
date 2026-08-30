@@ -1138,7 +1138,10 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def on_mount(self) -> None:
             self.query_one("#cvs", OptionList).focus()
 
-        def _attach(self, path: Any) -> None:
+        # NOT _attach: MessagePump._attach(parent) is how Textual attaches a
+        # node to the tree. Overriding it silently prevents the screen from
+        # ever mounting.
+        def attach_selected(self, path: Any) -> None:
             try:
                 self.dismiss(attach_cv_blocking(self.cfg, self.job_id, path))
             except Exception as exc:  # noqa: BLE001 - shown on the role page
@@ -1148,11 +1151,11 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             if not self.files:
                 self.dismiss(None)
                 return
-            self._attach(self.files[event.option_index])
+            self.attach_selected(self.files[event.option_index])
 
         def on_input_submitted(self, event: Any) -> None:
             if event.value.strip():
-                self._attach(event.value.strip())
+                self.attach_selected(event.value.strip())
 
         def action_cancel(self) -> None:
             self.dismiss(None)

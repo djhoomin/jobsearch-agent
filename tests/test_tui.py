@@ -923,3 +923,66 @@ class TestPresenceColumns:
         ids = tracker_outreach_ids(cfg)
         assert with_outreach in ids
         assert len(ids) == 1
+
+
+class TestScreensActuallyOpen:
+    """Press the key. Every modal key must open its screen.
+
+    A helper named `_attach` once overrode MessagePump._attach - how Textual
+    attaches a node to the tree - so the screen could never mount, and the
+    helper's own `except Exception` swallowed the cause. Nothing caught it
+    because the tests called the underlying functions instead of pressing keys.
+    """
+
+    @pytest.mark.parametrize("key", ["c", "n", "p"])
+    def test_role_page_keys_open_a_screen(self, cfg, key):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                await pilot.press(key)
+                await pilot.pause()
+                assert len(app.screen_stack) == 3, f"{key!r} did not open a screen"
+                await pilot.press("escape")
+                await pilot.pause()
+                assert len(app.screen_stack) == 2
+
+        asyncio.run(scenario())
+
+    @pytest.mark.parametrize("key", ["a", "n", "f", "comma"])
+    def test_main_screen_keys_open_a_screen(self, cfg, key):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press(key)
+                await pilot.pause()
+                assert len(app.screen_stack) == 2, f"{key!r} did not open a screen"
+
+        asyncio.run(scenario())
+
+    def test_no_screen_method_shadows_a_textual_internal(self):
+        """Guard the whole class of bug, not just the one instance."""
+        import re
+        from pathlib import Path
+
+        from textual.screen import ModalScreen
+
+        source = (Path(__file__).resolve().parents[1] / "src/jobsearch/tui.py").read_text()
+        defined = set(re.findall(r"^        def (\w+)\(", source, re.MULTILINE))
+        allowed = {"__init__"}
+        clashes = {
+            name
+            for name in defined
+            if name not in allowed
+            and not name.startswith(("on_", "action_", "key_"))
+            and name != "compose"
+            and hasattr(ModalScreen, name)
+        }
+        assert not clashes, f"these shadow Textual internals: {sorted(clashes)}"
