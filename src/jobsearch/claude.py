@@ -296,3 +296,24 @@ def stable_context_for(cfg, include: Iterable[str] = ("dossier", "base_cv", "rub
     if "rubric" in wanted:
         parts.append(("search_strategy", cfg.read_search_strategy()))
     return parts
+
+
+def make_client(cfg, dry_run: bool = False) -> Any:
+    """Build the client for the configured provider.
+
+    ``provider`` defaults to "anthropic". The Anthropic path is the native SDK
+    with structured outputs and explicit cache_control; "openai_compatible"
+    speaks chat-completions to any OpenAI-shaped endpoint (OpenRouter,
+    Together, Groq, vLLM, Ollama) and gives up explicit caching to do so.
+    """
+    provider = str(cfg.get("claude", "provider", "anthropic") or "anthropic").lower()
+    if provider in {"anthropic", "claude", ""}:
+        return ClaudeClient.from_config(cfg, dry_run=dry_run)
+    if provider in {"openai_compatible", "openai", "openrouter"}:
+        from .openai_compat import OpenAICompatibleClient
+
+        return OpenAICompatibleClient.from_config(cfg, dry_run=dry_run)
+    raise ClaudeError(
+        f'Unknown [claude].provider "{provider}". '
+        'Use "anthropic" or "openai_compatible".'
+    )

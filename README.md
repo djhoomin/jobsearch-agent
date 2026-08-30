@@ -479,6 +479,24 @@ A Claude Pro/Max subscription does not cover this: it calls the Anthropic API
 directly, so usage bills to the API platform whether you authenticate with
 `ANTHROPIC_API_KEY` or an `ant auth login` profile.
 
+**Any OpenAI-compatible endpoint** works as an alternative — OpenRouter,
+Together, Groq, a local vLLM or Ollama:
+
+```toml
+[claude]
+provider    = "openai_compatible"
+base_url    = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model       = "anthropic/claude-opus-4.1"
+```
+
+Needs `pip install -e '.[openai]'`. The Anthropic path keeps its native SDK, so
+nothing is downgraded by the option existing. Two things you give up by taking
+it: explicit prompt caching — the ~27KB dossier prefix is resent on every call,
+so a nominally cheaper model can cost *more* per role — and guaranteed
+structured output, since endpoints vary in whether they honour
+`response_format`.
+
 What is available instead:
 
 - **Prompt caching**, below — the dossier and base CV are a large stable prefix,

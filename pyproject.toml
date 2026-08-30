@@ -27,7 +27,8 @@ google = [
     "google-auth-httplib2>=0.2",
 ]
 tui = ["textual>=0.80"]
-dev = ["pytest>=8.0", "textual>=0.80"]
+openai = ["openai>=1.40"]
+dev = ["pytest>=8.0", "textual>=0.80", "openai>=1.40"]
 
 [project.scripts]
 jobsearch = "jobsearch.cli:main"

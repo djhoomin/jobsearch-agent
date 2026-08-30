@@ -33,9 +33,9 @@ class CLIError(RuntimeError):
 
 
 def _client(cfg: Config, args: argparse.Namespace):
-    from .claude import ClaudeClient
+    from .claude import make_client
 
-    client = ClaudeClient.from_config(cfg, dry_run=args.dry_run)
+    client = make_client(cfg, dry_run=args.dry_run)
     if args.dry_run:
         client.dry_run_hook = lambda stage, prompt: print(
             f"  [dry-run] would call Claude ({client.model}) for stage {stage!r}"

@@ -18,6 +18,20 @@ output_dir = "output"
 db_path = "output/jobsearch.db"
 
 [claude]
+# provider = "anthropic" (default) or "openai_compatible" for any OpenAI-shaped
+# endpoint: OpenRouter, Together, Groq, a local vLLM or Ollama.
+#
+#   provider    = "openai_compatible"
+#   base_url    = "https://openrouter.ai/api/v1"
+#   api_key_env = "OPENROUTER_API_KEY"
+#   model       = "anthropic/claude-opus-4.1"
+#   extra_headers = { "HTTP-Referer" = "https://github.com/you/jobsearch-agent" }
+#
+# Two things you give up on that path: explicit prompt caching (the ~27KB
+# dossier prefix is resent every call, so a nominally cheaper model can cost
+# more per role), and guaranteed structured output (response_format is sent,
+# but a JSON object is extracted from the text when an endpoint ignores it).
+provider = "anthropic"
 model = "claude-opus-5"
 # Non-streaming calls (scoring, grounding checks, outreach drafts).
 max_tokens = 16000

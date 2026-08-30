@@ -1443,7 +1443,7 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
 
     Kept free of Textual so it is testable without a terminal.
     """
-    from .claude import ClaudeClient
+    from .claude import make_client
     from .tracker import Tracker
 
     with Tracker.from_config(cfg) as tracker:
@@ -1461,7 +1461,7 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
             verdict = "[green]PASS[/]" if report.passed else "[red]FAIL[/]"
             return f"verify {verdict}  {Path(cv_path).name}  {report.page_count}pp"
 
-        client = ClaudeClient.from_config(cfg, dry_run=dry_run)
+        client = make_client(cfg, dry_run=dry_run)
 
         if stage == "score":
             from .scoring import score_posting
