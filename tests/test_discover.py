@@ -262,3 +262,58 @@ class TestRobotsPolicy:
         )
         with pytest.raises(AssertionError, match="should reach the network"):
             fetcher.get("https://api.ashbyhq.com/x", check_robots=False)
+
+
+class TestAshbyLocation:
+    """Ashby posts one record per multi-city role; the extras live in
+    `secondaryLocations`. Dropping them mislabels a role you can actually do.
+    """
+
+    def test_it_joins_primary_and_secondary(self):
+        from jobsearch.discover.sources import ashby_location
+
+        job = {
+            "location": "Paris",
+            "secondaryLocations": [{"location": "Amsterdam"}, {"location": "London"}],
+        }
+        assert ashby_location(job) == "Paris / Amsterdam / London"
+
+    def test_primary_only(self):
+        from jobsearch.discover.sources import ashby_location
+
+        assert ashby_location({"location": "Amsterdam"}) == "Amsterdam"
+
+    def test_it_deduplicates(self):
+        from jobsearch.discover.sources import ashby_location
+
+        job = {"location": "Paris", "secondaryLocations": [{"location": "Paris"}]}
+        assert ashby_location(job) == "Paris"
+
+    def test_it_tolerates_bare_strings(self):
+        from jobsearch.discover.sources import ashby_location
+
+        assert ashby_location({"location": "Paris", "secondaryLocations": ["Amsterdam"]}) == "Paris / Amsterdam"
+
+    def test_the_remote_flag_is_not_folded_into_the_location(self):
+        """Appending "remote" would make every non-blocklisted country pass.
+
+        "remote" is an allowed location pattern, so "Australia (remote)" would
+        read as workable. The flag stays on JobPosting.remote instead.
+        """
+        from jobsearch.discover.sources import ashby_location
+
+        assert ashby_location({"location": "Australia", "isRemote": True}) == "Australia"
+
+    def test_empty_is_safe(self):
+        from jobsearch.discover.sources import ashby_location
+
+        assert ashby_location({}) == ""
+        assert ashby_location({"secondaryLocations": None}) == ""
+
+    def test_a_secondary_amsterdam_rescues_an_eu_role(self, cfg):
+        """The bug in the wild: an EMEA role headed 'Paris' also open in Amsterdam."""
+        from jobsearch.discover.sources import ashby_location
+        from jobsearch.tui import location_cell
+
+        job = {"location": "Paris", "secondaryLocations": [{"location": "Amsterdam"}]}
+        assert location_cell({"location": ashby_location(job)}, cfg).startswith("✓")

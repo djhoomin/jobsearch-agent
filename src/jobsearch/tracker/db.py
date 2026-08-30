@@ -429,8 +429,13 @@ class Tracker:
         )
 
     def set_fields(self, job_id: str, **fields: Any) -> None:
-        """Update the free-form planning columns (warm_path, next_action, due)."""
-        allowed = {"warm_path", "next_action", "due", "notes"}
+        """Update the free-form planning columns, or correct a posting field.
+
+        `location` is included because a parser fix can leave stored locations
+        wrong on rows a sweep will not touch (dismissed or in-flight ones), and
+        a wrong location is what makes a workable role look unworkable.
+        """
+        allowed = {"warm_path", "next_action", "due", "notes", "location"}
         unknown = set(fields) - allowed
         if unknown:
             raise TrackerError(f"Cannot set unknown field(s): {', '.join(sorted(unknown))}")

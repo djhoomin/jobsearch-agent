@@ -237,7 +237,7 @@ def parse_ashby(payload: Any, board: BoardRef) -> list[JobPosting]:
                 title=job.get("title", ""),
                 url=job.get("jobUrl") or job.get("applyUrl", ""),
                 source="ashby",
-                location=job.get("location", "") or "",
+                location=ashby_location(job),
                 department=job.get("department", "") or job.get("team", "") or "",
                 description=job.get("descriptionPlain") or strip_html(job.get("descriptionHtml", "")),
                 posted_at=(job.get("publishedAt") or "")[:10],
@@ -250,6 +250,30 @@ def parse_ashby(payload: Any, board: BoardRef) -> list[JobPosting]:
             )
         )
     return out
+
+
+def ashby_location(job: dict[str, Any]) -> str:
+    """Primary plus secondary locations, joined.
+
+    Ashby posts one record for a multi-city role: `location` is the primary
+    office and `secondaryLocations` carries the rest. Keeping only the primary
+    mislabels a role that is workable elsewhere - an EMEA role headed "Paris"
+    that also lists Amsterdam reads as a French role and gets dismissed.
+    """
+    primary = (job.get("location") or "").strip()
+    names: list[str] = [primary] if primary else []
+    for entry in job.get("secondaryLocations") or []:
+        if isinstance(entry, dict):
+            name = (entry.get("location") or "").strip()
+        else:
+            name = str(entry).strip()
+        if name and name not in names:
+            names.append(name)
+    # Deliberately does NOT fold in `isRemote`. "remote" is an allowed location
+    # pattern, so appending it makes any country that is not explicitly
+    # blocklisted - Australia, Brazil, UAE - read as workable. The remote flag
+    # stays on JobPosting.remote for callers that want it.
+    return " / ".join(names)
 
 
 def parse_json_feed(payload: Any, board: BoardRef) -> list[JobPosting]:
