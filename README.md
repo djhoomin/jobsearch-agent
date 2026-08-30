@@ -1,17 +1,29 @@
 # jobsearch-agent
 
-An agent harness for one person's senior-AI-leadership job search. It finds
-roles on public job-board APIs, scores them against a written strategy, tailors
-a CV from a fact base without inventing anything, proves the resulting PDF
-survives an ATS parser, drafts outreach, and tracks the pipeline in SQLite.
+A terminal app for running a senior job search. It finds roles on public
+job-board APIs, scores them against a strategy you write in prose, tailors a CV
+from a fact base without inventing anything, proves the resulting PDF survives
+an ATS parser, drafts outreach, and tracks the pipeline in SQLite.
 
-It is deliberately narrow. It is built around one candidate's documents, one
-scoring rubric, and one set of hard constraints, all of which live in
-`config.local.toml` and can be repointed at someone else's.
+You drive it from [the TUI](#the-tui). Every stage is one keypress on the
+selected role, and the whole thing is also available as [subcommands](#the-pipeline)
+for scripting.
+
+```bash
+pip install -e '.[tui]'
+jobsearch setup      # guided: finds your documents, writes config.local.toml
+jobsearch tui        # everything else happens here
+```
+
+It is deliberately narrow: built around one candidate's documents, one scoring
+rubric, and one set of hard constraints, all in `config.local.toml` and
+repointable at someone else's.
 
 The most valuable thing in here is not the CV generation. It is
-[`jobsearch verify`](#the-ats-verifier) — the check that a beautiful PDF is
-still a machine-readable one.
+[the ATS verifier](#4-verify-the-ats-verifier) — the check that a beautiful
+PDF is still a machine-readable one. Three of the first four CVs it was pointed
+at failed, each for a different reason, and none of the failures were visible by
+looking at the PDF.
 
 ---
 
@@ -99,30 +111,35 @@ behaviour cannot drift between the two.
 └────────────────────────────────────────────────────────┘
 ```
 
+**On the pipeline table**
+
 | Key | Does |
 |---|---|
-| `s` | Score the selected role |
-| `t` | Tailor a CV for it |
-| `o` | Draft outreach |
-| `v` | Run the ATS verifier on its CV |
-| `enter` | Open the role page: constraints, per-dimension reasoning, notes, drafts |
-| `w` | Open the posting in your browser |
-| `c` | Attach a CV you already made (on the role page) |
-| `n` | Add a note (on the role page) |
-| `p` | Add a contact you found yourself (on the role page) |
-| `l` | Copy the contact links (on the role page) |
-| `y` | Copy contacts + drafted messages (on the role page) |
-| `Y` | Copy the whole role page |
-| `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
-| `n` | Add a role you found yourself; `ctrl+s` saves |
+| `enter` | Open the role page |
+| `s` `t` `o` `v` | Score · tailor · draft outreach · verify the CV |
+| `f` | Scan the boards — pick all tiers or one |
+| `a` | Set status; only legal transitions are offered |
+| `n` | Add a role you found yourself |
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |
 | `x` | Delete permanently (asks first) |
 | `h` | Show dismissed roles again |
-| `f` | Scan the boards — pick all tiers or one |
-| `,` | Settings: title filters, constraints, rubric weights |
 | `/` | Filter by company or title (`esc` clears) |
+| `,` | Settings: title filters, constraints, rubric weights |
 | `r` | Reload from the tracker |
 | `q` | Quit |
+
+**On the role page** (`enter`) — constraints, per-dimension reasoning with
+evidence, the grounding audit, your notes, contacts and drafts.
+
+| Key | Does |
+|---|---|
+| `s` `t` `o` `v` | The same four stages, without leaving the page |
+| `w` | Open the posting in your browser |
+| `c` | Attach a CV you already made |
+| `n` | Add a note |
+| `p` | Add a contact you found yourself |
+| `l` `y` `Y` | Copy the contact links · contacts and drafts · the whole page |
+| `esc` | Back |
 
 The location column carries a fitness glyph from the same `check_location` the
 scorer uses, so the table cannot disagree with what elimination will decide:
@@ -171,6 +188,10 @@ table, and results stream into the log pane at the bottom. `--dry-run` works
 here too: the app says so on start and makes no API calls.
 
 ## The pipeline
+
+Each stage below is a key in the TUI and a subcommand for scripting. They call
+the same functions, so the two cannot drift apart.
+
 
 Each stage is independently invocable and chainable. `discover` writes to the
 tracker; the others take a job id back out of it.
