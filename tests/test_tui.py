@@ -797,3 +797,53 @@ class TestAttachCv:
             assert names.index("new_cv.pdf") < names.index("old_cv.pdf")
         finally:
             old.unlink(); new.unlink()
+
+
+class TestSettingsScreen:
+    def test_comma_opens_settings(self, cfg):
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press(",")
+                await pilot.pause()
+                assert len(app.screen_stack) == 2
+
+        asyncio.run(scenario())
+
+    def test_saving_writes_the_file_and_reloads_the_config(self, cfg):
+        """A settings change must take effect without restarting the app."""
+        from textual.widgets import Input
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert app.cfg.raw["constraints"]["comp_floor_eur"] != 199000
+                await pilot.press(",")
+                await pilot.pause()
+                app.screen.query_one("#set-comp_floor_eur", Input).value = "199000"
+                app.screen.action_save()
+                await pilot.pause()
+                assert app.cfg.raw["constraints"]["comp_floor_eur"] == 199000
+
+        asyncio.run(scenario())
+
+    def test_an_invalid_value_does_not_write(self, cfg):
+        from textual.widgets import Input
+
+        before = cfg.source.read_text(encoding="utf-8")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press(",")
+                await pilot.pause()
+                app.screen.query_one("#w-buyer", Input).value = "0.9"
+                app.screen.action_save()
+                await pilot.pause()
+                assert len(app.screen_stack) == 2, "the screen stays open on error"
+                assert cfg.source.read_text(encoding="utf-8") == before
+
+        asyncio.run(scenario())

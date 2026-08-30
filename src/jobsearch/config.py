@@ -131,6 +131,20 @@ class Config:
                 return board
         return None
 
+    def reload(self) -> "Config":
+        """Re-read the config file in place.
+
+        Mutates this object rather than returning a new one: the TUI hands the
+        same Config to every screen, so replacing it would leave stale copies
+        behind after a settings change.
+        """
+        if self.source is None:
+            raise ConfigError("this Config was not loaded from a file")
+        with self.source.open("rb") as fh:
+            self.raw = tomllib.load(fh)
+        self.__post_init__()
+        return self
+
     def ensure_output_dir(self) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         return self.output_dir

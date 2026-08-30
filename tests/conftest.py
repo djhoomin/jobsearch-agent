@@ -83,7 +83,7 @@ def cfg(tmp_path: Path) -> Config:
     text = text[:start] + LOCAL_PATHS + text[end:]
     (tmp_path / "config.local.toml").write_text(text, encoding="utf-8")
 
-    return Config(root=tmp_path, raw=tomllib.loads(text))
+    return Config(root=tmp_path, raw=tomllib.loads(text), source=tmp_path / "config.local.toml")
 
 
 @pytest.fixture

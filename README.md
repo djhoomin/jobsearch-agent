@@ -114,6 +114,7 @@ behaviour cannot drift between the two.
 | `x` | Delete permanently (asks first) |
 | `h` | Show dismissed roles again |
 | `f` | Scan the boards — pick all tiers or one |
+| `,` | Settings: title filters, constraints, rubric weights |
 | `/` | Filter by company or title (`esc` clears) |
 | `r` | Reload from the tracker |
 | `q` | Quit |
@@ -128,6 +129,12 @@ than upserting them. `upsert_job` preserves status and scores anyway, but
 skipping means a sweep provably cannot rewrite the posting text of a role you
 have applied to. The summary counts them, so you can see the filter working:
 `0 new · 8 refreshed · 52 left dismissed · 3 in progress, untouched`.
+
+Settings (`,`) edits `config.local.toml` in place, replacing values rather than
+re-serialising, so every comment in the file survives. Weights are validated to
+sum to 1.0 before anything is written, and the config reloads without
+restarting. `ctrl+e` opens `search-strategy.md` in `$EDITOR` — the scorer reads
+that prose directly, so it is where judgement belongs, not a form.
 
 **Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
 `upsert_job` never clobbers the status of an existing job — so a dismissed role

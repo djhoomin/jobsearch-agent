@@ -535,6 +535,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         #detail { height: auto; max-height: 16; border-top: solid $accent; padding: 0 1; }
         #outreach { padding: 1 2; height: 1fr; background: $surface; }
         #rolestatus { height: auto; padding: 1 2 0 2; background: $surface; }
+        #settings { padding: 1 2; height: 1fr; background: $surface; }
+        #settings Input { margin-bottom: 1; }
         #picker { padding: 1 2; height: auto; background: $surface; border: solid $accent; }
         #newrole { padding: 1 2; height: 1fr; background: $surface; border: solid $accent; }
         #newrole Input { margin-bottom: 1; }
@@ -556,6 +558,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("x", "delete_role", "Delete"),
             Binding("h", "toggle_dismissed", "Show dismissed"),
             Binding("f", "scan", "Scan boards"),
+            Binding("comma", "settings", "Settings"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
@@ -739,6 +742,15 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             finally:
                 self.call_from_thread(self.finish_stage)
 
+        def action_settings(self) -> None:
+            self.push_screen(SettingsScreen(self.cfg), self.after_settings)
+
+        def after_settings(self, message: str | None) -> None:
+            if message:
+                self.log_line(message)
+                self.cfg.reload()
+                self.action_refresh_rows()
+
         def action_toggle_dismissed(self) -> None:
             self.show_dismissed = not self.show_dismissed
             self.action_refresh_rows()
@@ -866,6 +878,87 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def finish_stage(self) -> None:
             self.busy = False
             self.action_refresh_rows()
+
+    class SettingsScreen(ModalScreen):  # type: ignore[misc]
+        """Edit the settings that decide what the search looks for.
+
+        Writes back into config.local.toml in place, so its comments survive.
+        """
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel"),
+            Binding("ctrl+s", "save", "Save"),
+            Binding("ctrl+e", "open_strategy", "Edit strategy doc"),
+        ]
+
+        def __init__(self, cfg: Config) -> None:
+            super().__init__()
+            self.cfg = cfg
+
+        def compose(self) -> ComposeResult:
+            from .settings import SETTINGS, WEIGHT_KEYS, current_values
+
+            values = current_values(self.cfg.raw)
+            with VerticalScroll(id="settings"):
+                yield Static(
+                    "[b]Settings[/]  [dim]ctrl+s save · esc cancel · "
+                    "ctrl+e open search-strategy.md[/]\n"
+                    "[dim]Lists are comma separated. Judgement lives in the "
+                    "strategy doc, which the scorer reads directly.[/]"
+                )
+                for spec in SETTINGS:
+                    value = values.get(spec.key)
+                    shown = ", ".join(value) if isinstance(value, list) else str(
+                        "true" if value is True else "false" if value is False else value
+                    )
+                    yield Static(f"\n[b]{spec.label}[/]  [dim]{spec.help}[/]")
+                    yield Input(value=shown, id=f"set-{spec.key}")
+                yield Static("\n[b]Rubric weights[/]  [dim]must sum to 1.0[/]")
+                for key in WEIGHT_KEYS:
+                    yield Static(f"[dim]{key}[/]")
+                    yield Input(value=str(values.get(f"weight_{key}", "")), id=f"w-{key}")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            from .settings import SETTINGS
+
+            self.query_one(f"#set-{SETTINGS[0].key}", Input).focus()
+
+        def action_open_strategy(self) -> None:
+            import os
+            import subprocess
+
+            editor = os.environ.get("EDITOR") or "open"
+            with self.app.suspend():
+                subprocess.call([editor, str(self.cfg.search_strategy)])
+
+        def action_save(self) -> None:
+            from .settings import SETTINGS, WEIGHT_KEYS, SettingsError, apply_edits
+
+            edits = {
+                spec.key: self.query_one(f"#set-{spec.key}", Input).value
+                for spec in SETTINGS
+            }
+            weights = {
+                key: self.query_one(f"#w-{key}", Input).value for key in WEIGHT_KEYS
+            }
+            path = self.cfg.source
+            if path is None:
+                self.notify(
+                    "this config was not loaded from a file, so it cannot be saved",
+                    severity="error",
+                )
+                return
+            try:
+                updated = apply_edits(path.read_text(encoding="utf-8"), edits, weights)
+            except SettingsError as exc:
+                self.notify(str(exc), severity="error", timeout=8)
+                return
+            path.write_text(updated, encoding="utf-8")
+            self.dismiss(f"settings saved → [dim]{path.name}[/]")
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
 
     class ScanScreen(ModalScreen):  # type: ignore[misc]
         """Choose which board tiers to sweep."""
