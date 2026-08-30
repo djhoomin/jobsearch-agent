@@ -986,3 +986,84 @@ class TestScreensActuallyOpen:
             and hasattr(ModalScreen, name)
         }
         assert not clashes, f"these shadow Textual internals: {sorted(clashes)}"
+
+
+class TestCopy:
+    """Textual captures the mouse, so terminal selection does not reach the app.
+    Copying has to be an explicit action.
+    """
+
+    def test_it_shells_out_to_the_platform_clipboard(self, monkeypatch):
+        import subprocess
+
+        import jobsearch.tui as tui_mod
+
+        seen = {}
+
+        def fake_run(command, input=None, check=False):
+            seen["command"] = command
+            seen["payload"] = input.decode("utf-8")
+            return subprocess.CompletedProcess(command, 0)
+
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/pbcopy" if name == "pbcopy" else None)
+        monkeypatch.setattr("subprocess.run", fake_run)
+        message = tui_mod.copy_to_clipboard("hello")
+        assert seen["command"] == ["pbcopy"]
+        assert seen["payload"] == "hello"
+        assert "copied 5 characters" in message
+
+    def test_it_reports_when_no_clipboard_exists(self, monkeypatch):
+        import jobsearch.tui as tui_mod
+
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        assert "no clipboard command" in tui_mod.copy_to_clipboard("hello")
+
+    def test_empty_text_is_not_copied(self):
+        import jobsearch.tui as tui_mod
+
+        assert tui_mod.copy_to_clipboard("   ") == "nothing to copy"
+
+    def test_a_clipboard_failure_is_reported_not_raised(self, monkeypatch):
+        import subprocess
+
+        import jobsearch.tui as tui_mod
+
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/pbcopy")
+
+        def boom(*a, **k):
+            raise OSError("pipe closed")
+
+        monkeypatch.setattr("subprocess.run", boom)
+        assert "clipboard failed" in tui_mod.copy_to_clipboard("hello")
+
+    def test_contact_links_are_one_per_line(self, cfg):
+        from jobsearch.models import Contact, OutreachDraft
+        from jobsearch.tui import contact_links_text
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_outreach(
+                OutreachDraft(
+                    job_id=job_id,
+                    contacts=[
+                        Contact(title="VP Eng", linkedin_search_url="https://x.test/1"),
+                        Contact(title="", name="A Person", linkedin_search_url="https://x.test/2"),
+                    ],
+                )
+            )
+        lines = contact_links_text(cfg, job_id).splitlines()
+        assert lines == ["VP Eng: https://x.test/1", "A Person: https://x.test/2"]
+
+    @pytest.mark.parametrize("key", ["y", "l"])
+    def test_copy_keys_are_bound_on_the_role_page(self, cfg, key):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                assert key in set(app.screen.active_bindings)
+
+        asyncio.run(scenario())

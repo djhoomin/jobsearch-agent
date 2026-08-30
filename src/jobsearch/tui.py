@@ -349,6 +349,50 @@ def add_contact_blocking(
     return f"contact added: {name or title.strip()}"
 
 
+CLIPBOARD_COMMANDS: tuple[tuple[str, ...], ...] = (
+    ("pbcopy",),                                  # macOS
+    ("wl-copy",),                                 # Wayland
+    ("xclip", "-selection", "clipboard"),         # X11
+    ("clip.exe",),                                # WSL
+)
+
+
+def copy_to_clipboard(text: str) -> str:
+    """Put text on the system clipboard, or say why it could not.
+
+    Shells out to the platform clipboard command rather than relying on the
+    terminal's OSC 52 support, which is off by default in several terminals
+    and silently does nothing when it is.
+    """
+    import shutil
+    import subprocess
+
+    if not text.strip():
+        return "nothing to copy"
+    for command in CLIPBOARD_COMMANDS:
+        if shutil.which(command[0]):
+            try:
+                subprocess.run(list(command), input=text.encode("utf-8"), check=True)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return f"clipboard failed: {exc}"
+            return f"copied {len(text)} characters via {command[0]}"
+    return "no clipboard command found (pbcopy, wl-copy, xclip, clip.exe)"
+
+
+def contact_links_text(cfg: Config, job_id: str) -> str:
+    """Just the contact search URLs, one per line - the usual thing to copy."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        contacts = tracker.contacts(tracker.resolve_job_id(job_id))
+    lines = []
+    for contact in contacts:
+        label = _get(contact, "name") or _get(contact, "title", "contact")
+        url = _get(contact, "search_url")
+        lines.append(f"{label}: {url}" if url else str(label))
+    return "\n".join(lines)
+
+
 def candidate_cv_files(cfg: Config) -> list[Path]:
     """CVs already on disk: alongside the base CV, and in the output folder.
 
@@ -1306,6 +1350,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("c", "attach_cv", "Attach CV"),
             Binding("n", "add_note", "Note"),
             Binding("p", "add_contact", "Contact"),
+            Binding("y", "copy_outreach", "Copy outreach"),
+            Binding("l", "copy_links", "Copy links"),
+            Binding("Y", "copy_all", "Copy page"),
         ]
 
         def __init__(self, cfg: Config, job_id: str) -> None:
@@ -1351,6 +1398,18 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def action_dismiss_screen(self) -> None:
             self.dismiss()
+
+        def _copy(self, text: str) -> None:
+            self.query_one("#rolestatus", Static).update(f"  {copy_to_clipboard(text)}")
+
+        def action_copy_links(self) -> None:
+            self._copy(contact_links_text(self.cfg, self.job_id))
+
+        def action_copy_outreach(self) -> None:
+            self._copy(outreach_detail_text(self.cfg, self.job_id))
+
+        def action_copy_all(self) -> None:
+            self._copy(role_detail_text(self.cfg, self.job_id))
 
         def action_add_note(self) -> None:
             self.app.push_screen(NoteScreen(self.cfg, self.job_id), self.after_attach)

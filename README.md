@@ -110,6 +110,9 @@ behaviour cannot drift between the two.
 | `c` | Attach a CV you already made (on the role page) |
 | `n` | Add a note (on the role page) |
 | `p` | Add a contact you found yourself (on the role page) |
+| `l` | Copy the contact links (on the role page) |
+| `y` | Copy contacts + drafted messages (on the role page) |
+| `Y` | Copy the whole role page |
 | `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
 | `n` | Add a role you found yourself; `ctrl+s` saves |
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |
@@ -144,6 +147,14 @@ re-renders after each step. It never cuts content: that is a judgement call, so
 if whitespace alone cannot make it fit you are told how many pages remain. The
 grounding audit is stored alongside the CV and shown on the role page, rather
 than scrolling past once.
+
+**Copying.** Textual captures the mouse, so dragging to select does not reach
+the app. Use `l` / `y` / `Y` on the role page — they shell out to `pbcopy`,
+`wl-copy`, `xclip` or `clip.exe` rather than relying on the terminal's OSC 52
+support, which is off by default in several terminals and fails silently when
+it is. For ad-hoc selection, most terminals bypass mouse capture with a
+modifier held down while dragging (Option in iTerm2, Fn in Terminal.app,
+Shift in most Linux terminals).
 
 **Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
 `upsert_job` never clobbers the status of an existing job — so a dismissed role
