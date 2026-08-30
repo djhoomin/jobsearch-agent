@@ -467,3 +467,168 @@ class TestDismissAndDelete:
                     assert tracker.get_job(job_id) is not None, "not deleted yet"
 
         asyncio.run(scenario())
+
+
+class TestScan:
+    """A sweep must never disturb a role you have already decided about."""
+
+    def _fake_report(self, postings, monkeypatch):
+        from types import SimpleNamespace
+
+        import jobsearch.discover as discover_mod
+
+        report = SimpleNamespace(
+            postings=postings, boards_checked=3, raw_count=len(postings), errors=[]
+        )
+        monkeypatch.setattr(discover_mod, "discover", lambda cfg, **kw: report)
+        return report
+
+    def _posting(self, job_id, company="Northwind"):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(
+            company=company,
+            title="Director of Engineering, AI",
+            url="https://example.com/job/1",
+            location="Amsterdam, Netherlands",
+            description="Fresh text from this sweep.",
+            job_id=job_id,
+        )
+
+    def test_new_postings_are_added(self, cfg, monkeypatch):
+        from jobsearch.tui import scan_blocking
+
+        self._fake_report([self._posting("brand-new-1")], monkeypatch)
+        assert "1 new" in scan_blocking(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.get_job("brand-new-1") is not None
+
+    def test_a_dismissed_role_is_skipped_entirely(self, cfg, monkeypatch):
+        from jobsearch.tui import dismiss_blocking, scan_blocking
+
+        job_id = seed(cfg)
+        dismiss_blocking(cfg, job_id)
+        with Tracker.from_config(cfg) as tracker:
+            before = tracker.get_job(job_id)["description"]
+
+        self._fake_report([self._posting(job_id)], monkeypatch)
+        summary = scan_blocking(cfg)
+
+        assert "left dismissed" in summary
+        with Tracker.from_config(cfg) as tracker:
+            row = tracker.get_job(job_id)
+        assert row["status"] == "Withdrawn", "a sweep must not resurrect a dismissal"
+        assert row["description"] == before, "and must not rewrite it either"
+
+    def test_a_role_in_progress_is_left_alone(self, cfg, monkeypatch):
+        from jobsearch.tui import scan_blocking, set_status_blocking
+
+        job_id = seed(cfg)
+        set_status_blocking(cfg, job_id, "Applied")
+        with Tracker.from_config(cfg) as tracker:
+            before = tracker.get_job(job_id)["description"]
+
+        self._fake_report([self._posting(job_id)], monkeypatch)
+        summary = scan_blocking(cfg)
+
+        assert "in progress, untouched" in summary
+        with Tracker.from_config(cfg) as tracker:
+            row = tracker.get_job(job_id)
+        assert row["status"] == "Applied"
+        assert row["description"] == before
+
+    def test_an_untouched_role_is_refreshed(self, cfg, monkeypatch):
+        from jobsearch.tui import scan_blocking
+
+        job_id = seed(cfg)
+        self._fake_report([self._posting(job_id)], monkeypatch)
+        assert "refreshed" in scan_blocking(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            assert "Fresh text" in tracker.get_job(job_id)["description"]
+
+    def test_board_errors_are_reported_not_swallowed(self, cfg, monkeypatch):
+        from types import SimpleNamespace
+
+        import jobsearch.discover as discover_mod
+        from jobsearch.tui import scan_blocking
+
+        monkeypatch.setattr(
+            discover_mod,
+            "discover",
+            lambda cfg, **kw: SimpleNamespace(
+                postings=[], boards_checked=2, raw_count=0, errors=["acme: HTTP 404"]
+            ),
+        )
+        assert "acme: HTTP 404" in scan_blocking(cfg)
+
+
+class TestTierPicker:
+    def test_options_come_from_the_configured_boards(self, cfg):
+        from jobsearch.tui import tier_options
+
+        options = tier_options(cfg)
+        assert options[0][1] is None, "the first option scans everything"
+        tiers = [t for _, t in options[1:]]
+        configured = sorted({b.tier for b in cfg.boards})
+        assert tiers == [[t] for t in configured]
+
+    def test_labels_carry_board_counts(self, cfg):
+        from jobsearch.tui import tier_options
+
+        label, _ = tier_options(cfg)[0]
+        assert f"({len(cfg.boards)} board" in label
+
+    def test_it_singularises_a_lone_board(self, cfg):
+        from jobsearch.config import BoardRef
+        from jobsearch.tui import tier_options
+
+        cfg.boards = [BoardRef(company="Solo", ats="ashby", token="solo", tier=1)]
+        assert "(1 board)" in tier_options(cfg)[0][0]
+
+    def test_f_opens_the_picker_rather_than_scanning(self, cfg):
+        """The keypress must not start a network sweep on its own."""
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.action_scan()
+                await pilot.pause()
+                assert len(app.screen_stack) == 2
+                assert app.busy is False, "nothing runs until a tier is chosen"
+
+        asyncio.run(scenario())
+
+    def test_cancelling_the_picker_runs_nothing(self, cfg, monkeypatch):
+        import jobsearch.tui as tui_mod
+
+        called = []
+        monkeypatch.setattr(tui_mod, "scan_blocking", lambda *a, **k: called.append(1))
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.after_scan_choice(None)
+                await pilot.pause()
+                assert called == []
+                assert app.busy is False
+
+        asyncio.run(scenario())
+
+    def test_choosing_a_tier_scans_only_that_tier(self, cfg, monkeypatch):
+        from types import SimpleNamespace
+
+        import jobsearch.discover as discover_mod
+
+        seen: dict = {}
+
+        def fake_discover(_cfg, **kw):
+            seen.update(kw)
+            return SimpleNamespace(postings=[], boards_checked=1, raw_count=0, errors=[])
+
+        monkeypatch.setattr(discover_mod, "discover", fake_discover)
+        from jobsearch.tui import scan_blocking
+
+        scan_blocking(cfg, [2])
+        assert seen["tiers"] == [2]

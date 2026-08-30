@@ -111,6 +111,7 @@ behaviour cannot drift between the two.
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |
 | `x` | Delete permanently (asks first) |
 | `h` | Show dismissed roles again |
+| `f` | Scan the boards — pick all tiers or one |
 | `/` | Filter by company or title (`esc` clears) |
 | `r` | Reload from the tracker |
 | `q` | Quit |
@@ -119,6 +120,12 @@ The location column carries a fitness glyph from the same `check_location` the
 scorer uses, so the table cannot disagree with what elimination will decide:
 `✓` workable, `✗` outside Amsterdam / NL-hybrid / remote-EU, `?` unclassifiable.
 A bare "remote" is not a pass — `Remote - United States` is a US role.
+
+A scan (`f`) skips roles you have dismissed or are already working on, rather
+than upserting them. `upsert_job` preserves status and scores anyway, but
+skipping means a sweep provably cannot rewrite the posting text of a role you
+have applied to. The summary counts them, so you can see the filter working:
+`0 new · 8 refreshed · 52 left dismissed · 3 in progress, untouched`.
 
 **Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
 `upsert_job` never clobbers the status of an existing job — so a dismissed role

@@ -169,6 +169,73 @@ def delete_blocking(cfg: Config, job_id: str) -> str:
     return company
 
 
+def tier_options(cfg: Config) -> list[tuple[str, list[int] | None]]:
+    """Scan choices derived from the configured boards, with their counts.
+
+    Built from the config rather than hardcoded, so a config with only tier 1
+    and 3 offers exactly those.
+    """
+    counts: dict[int, int] = {}
+    for board in cfg.boards:
+        counts[board.tier] = counts.get(board.tier, 0) + 1
+    total = sum(counts.values())
+    options: list[tuple[str, list[int] | None]] = [
+        (f"All tiers  ({total} board{'s' if total != 1 else ''})", None)
+    ]
+    for tier in sorted(counts):
+        n = counts[tier]
+        options.append((f"Tier {tier}  ({n} board{'s' if n != 1 else ''})", [tier]))
+    return options
+
+
+def scan_blocking(cfg: Config, tiers: list[int] | None = None) -> str:
+    """Sweep the configured boards and fold results into the tracker.
+
+    Roles you have dismissed, or are already working on, are skipped entirely
+    rather than upserted. `upsert_job` would preserve their status anyway, but
+    skipping makes it impossible for a sweep to touch a role you have already
+    made a decision about.
+    """
+    from .discover import discover
+    from .tracker import Tracker
+
+    report = discover(cfg, tiers=tiers)
+    new = refreshed = dismissed = in_progress = 0
+
+    with Tracker.from_config(cfg) as tracker:
+        for posting in report.postings:
+            existing = tracker.get_job(posting.job_id)
+            if existing is None:
+                tracker.upsert_job(posting)
+                new += 1
+                continue
+            status = str(existing["status"])
+            if status == DISMISSED_STATUS.value:
+                dismissed += 1
+                continue
+            if status != Status.NOT_STARTED.value:
+                in_progress += 1
+                continue
+            tracker.upsert_job(posting)
+            refreshed += 1
+
+    parts = [
+        f"{report.boards_checked} board(s), {report.raw_count} posting(s), "
+        f"{len(report.postings)} matched the title filter"
+    ]
+    parts.append(f"[b]{new} new[/]")
+    if refreshed:
+        parts.append(f"{refreshed} refreshed")
+    if dismissed:
+        parts.append(f"[dim]{dismissed} left dismissed[/]")
+    if in_progress:
+        parts.append(f"[dim]{in_progress} in progress, untouched[/]")
+    summary = "scan: " + "  ·  ".join(parts)
+    for error in report.errors[:5]:
+        summary += f"\n  [yellow]![/] {error}"
+    return summary
+
+
 def location_cell(row: Any, cfg: Config) -> str:
     """Location plus a fitness glyph, using the same check the scorer uses.
 
@@ -280,6 +347,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("d", "dismiss", "Dismiss"),
             Binding("x", "delete_role", "Delete"),
             Binding("h", "toggle_dismissed", "Show dismissed"),
+            Binding("f", "scan", "Scan boards"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
@@ -439,6 +507,30 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 self.log_line(result)
             self.action_refresh_rows()
 
+        def action_scan(self) -> None:
+            if self.busy:
+                self.log_line("[yellow]a stage is already running[/]")
+                return
+            self.push_screen(ScanScreen(self.cfg), self.after_scan_choice)
+
+        def after_scan_choice(self, choice: tuple[str, list[int] | None] | None) -> None:
+            if choice is None:
+                return
+            label, tiers = choice
+            boards = [b for b in self.cfg.boards if tiers is None or b.tier in tiers]
+            self.busy = True
+            self.log_line(f"[b]scan[/] → {label.split('  ')[0]}, sweeping {len(boards)} board(s)…")
+            self.run_scan(tiers)
+
+        @work(thread=True, exclusive=True)
+        def run_scan(self, tiers: list[int] | None = None) -> None:
+            try:
+                self.call_from_thread(self.log_line, scan_blocking(self.cfg, tiers))
+            except Exception as exc:  # noqa: BLE001 - surfaced into the log pane
+                self.call_from_thread(self.log_line, f"[red]{type(exc).__name__}:[/] {exc}")
+            finally:
+                self.call_from_thread(self.finish_stage)
+
         def action_toggle_dismissed(self) -> None:
             self.show_dismissed = not self.show_dismissed
             self.action_refresh_rows()
@@ -546,6 +638,30 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def finish_stage(self) -> None:
             self.busy = False
             self.action_refresh_rows()
+
+    class ScanScreen(ModalScreen):  # type: ignore[misc]
+        """Choose which board tiers to sweep."""
+
+        BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+        def __init__(self, cfg: Config) -> None:
+            super().__init__()
+            self.options = tier_options(cfg)
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="picker"):
+                yield Static("Scan which boards?")
+                yield OptionList(*[label for label, _ in self.options], id="tiers")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#tiers", OptionList).focus()
+
+        def on_option_list_option_selected(self, event: Any) -> None:
+            self.dismiss(self.options[event.option_index])
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
 
     class ConfirmDeleteScreen(ModalScreen):  # type: ignore[misc]
         """Deletion is irreversible, so it asks. Dismissal (d) does not."""
