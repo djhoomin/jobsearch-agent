@@ -126,6 +126,31 @@ class TestLetterHouseStyle:
 
     def test_the_instructions_forbid_them_too(self):
         """Post-processing is the backstop; the prompt is the first line."""
+        import re
+
         from jobsearch.letter import LETTER_INSTRUCTIONS
 
-        assert "em dash" in LETTER_INSTRUCTIONS.lower()
+        # Normalise whitespace: the rule is line-wrapped in the prompt, so a
+        # plain substring check fails on a wrap rather than on a missing rule.
+        flat = re.sub(r"\s+", " ", LETTER_INSTRUCTIONS.lower())
+        assert "em dash" in flat
+
+
+class TestLetterTone:
+    """Confidence and arrogance differ in specific, nameable ways."""
+
+    def test_the_instructions_name_each_tipping_point(self):
+        import re
+
+        from jobsearch.letter import LETTER_INSTRUCTIONS
+
+        flat = re.sub(r"\s+", " ", LETTER_INSTRUCTIONS.lower())
+        for rule in (
+            "do not tell the reader what their own job",   # no lecturing them
+            "no slogans",                                   # no "not demos"
+            "at most three numbers",                        # no achievement stacking
+            'say "we" where the work was shared',           # credit the team
+            "one genuine question",                         # curiosity, not just supply
+            "modest next step",                             # no presuming their process
+        ):
+            assert rule in flat, f"the tone guidance lost: {rule}"

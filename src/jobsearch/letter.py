@@ -54,9 +54,31 @@ semiconductor partner stays anonymous, no compensation specifics.
 ## Register
 
 Plain, direct, first person. No superlatives about yourself, no "passionate",
-no "thrilled", no "leverage" as a verb, no three-adjective strings. Never an em dash or an
-en dash - use a plain hyphen, a comma, or two sentences. Write the
+no "thrilled", no "leverage" as a verb, no three-adjective strings. Never an em
+dash or an en dash - use a plain hyphen, a comma, or two sentences. Write the
 way a competent person emails a peer. Contractions are fine.
+
+## Confidence, not arrogance
+
+These are the specific things that tip one into the other. Follow all six.
+
+1. Do not tell the reader what their own job or function requires. They know.
+   Never open by defining their work ("Running an X practice takes two
+   things..."). Earn standing by what you have done, not by characterising
+   what they do.
+2. No slogans, and no sentence implying other people do it badly - "in
+   production, not demos", "real X, not Y", "unlike most". A put-down of
+   absent third parties reads as arrogance even when it is accurate.
+3. At most three numbers in the whole letter. Pick the three that answer this
+   posting. A stack of achievements in one sentence reads as performance;
+   three well-chosen ones read as evidence.
+4. Say "we" where the work was shared, and credit the team that did it. Solo
+   work may be described as solo once, not repeatedly.
+5. Include one genuine question about the role, or one thing you would want to
+   learn in it. A letter that only asserts reads as arrogant; one that also
+   asks reads as confident. This is not optional.
+6. Offer a modest next step. Do not presume their process or their calendar -
+   no offering to present to panels, no "any week".
 
 If the posting names a hiring manager, address them. Otherwise use a plain
 "Hello," - never "To Whom It May Concern" or "Dear Sir/Madam".
