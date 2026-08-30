@@ -661,9 +661,21 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         for board in cfg.boards:
             try:
                 found = fetch_board(board, fetcher)
-                check(f"  {board.company}", True, f"{len(found)} postings")
+                if found:
+                    check(f"  {board.company}", True, f"{len(found)} postings")
+                else:
+                    # A board that answers 200 with nothing is usually a stale
+                    # token after an ATS migration, not a company with no jobs.
+                    # Reporting it as ok hides that; it is the quietest way for
+                    # a target to fall out of the sweep.
+                    check(
+                        f"  {board.company}",
+                        False,
+                        "0 postings - the token answers but is empty; "
+                        "check whether they moved ATS",
+                    )
             except DiscoveryError as exc:
-                check(f"  {board.company}", False, f"{exc} - fix the token in config.toml")
+                check(f"  {board.company}", False, f"{exc} - fix the token in config.local.toml")
     print("google sync:")
     enabled = cfg.get("google", "enabled", False)
     print(f"  {'enabled' if enabled else 'disabled (everything else still works)'}")
