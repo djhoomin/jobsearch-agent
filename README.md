@@ -108,6 +108,9 @@ behaviour cannot drift between the two.
 | `enter` | Read the drafted contacts and outreach messages |
 | `a` | Set status (Applied, Rejected, …) — only legal transitions are offered |
 | `n` | Add a role you found yourself; `ctrl+s` saves |
+| `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |
+| `x` | Delete permanently (asks first) |
+| `h` | Show dismissed roles again |
 | `/` | Filter by company or title (`esc` clears) |
 | `r` | Reload from the tracker |
 | `q` | Quit |
@@ -116,6 +119,11 @@ The location column carries a fitness glyph from the same `check_location` the
 scorer uses, so the table cannot disagree with what elimination will decide:
 `✓` workable, `✗` outside Amsterdam / NL-hybrid / remote-EU, `?` unclassifiable.
 A bare "remote" is not a pass — `Remote - United States` is a US role.
+
+**Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
+`upsert_job` never clobbers the status of an existing job — so a dismissed role
+stays dismissed the next time `discover` sweeps its board. A deleted one comes
+straight back. Delete is there for genuine junk, and it asks first.
 
 Stages run on a worker thread, so a long tailoring call does not freeze the
 table, and results stream into the log pane at the bottom. `--dry-run` works

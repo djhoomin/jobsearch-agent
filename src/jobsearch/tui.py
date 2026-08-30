@@ -131,6 +131,44 @@ def add_role_blocking(
         return tracker.upsert_job(posting)
 
 
+DISMISSED_STATUS = Status.WITHDRAWN
+
+
+def dismiss_blocking(cfg: Config, job_id: str) -> str:
+    """Mark a role as not being pursued, stickily.
+
+    Uses a status rather than a delete on purpose: `upsert_job` never clobbers
+    the status of an existing job, so a dismissed role stays dismissed when
+    `discover` sweeps its board again. A deleted one would simply come back.
+    """
+    from .models import TRANSITIONS
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        current = Status.parse(str(tracker.get_job(job_id)["status"]))
+        if current is DISMISSED_STATUS:
+            return "already dismissed"
+        target = (
+            DISMISSED_STATUS
+            if DISMISSED_STATUS in TRANSITIONS.get(current, set())
+            else Status.PARKED
+        )
+        tracker.set_status(job_id, target, reason="dismissed from the TUI as not relevant")
+    return target.value
+
+
+def delete_blocking(cfg: Config, job_id: str) -> str:
+    """Permanently remove a job row. `discover` may re-add it from its board."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        job_id = tracker.resolve_job_id(job_id)
+        company = str(tracker.get_job(job_id)["company"])
+        tracker.delete_job(job_id)
+    return company
+
+
 def location_cell(row: Any, cfg: Config) -> str:
     """Location plus a fitness glyph, using the same check the scorer uses.
 
@@ -239,6 +277,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("enter", "open_outreach", "Read drafts"),
             Binding("a", "set_status", "Status"),
             Binding("n", "new_role", "Add role"),
+            Binding("d", "dismiss", "Dismiss"),
+            Binding("x", "delete_role", "Delete"),
+            Binding("h", "toggle_dismissed", "Show dismissed"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
@@ -250,6 +291,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.cfg = cfg
             self.dry_run = dry_run
             self.filter_text = ""
+            self.show_dismissed = False
             self.rows: list[Any] = []
             self.busy = False
             # The text last rendered into the detail pane. Kept on the app so
@@ -285,6 +327,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
             with Tracker.from_config(self.cfg) as tracker:
                 rows = tracker.list_jobs()
+            if not self.show_dismissed:
+                rows = [r for r in rows if str(_get(r, "status", "")) != DISMISSED_STATUS.value]
             needle = self.filter_text.strip().lower()
             if needle:
                 rows = [
@@ -311,7 +355,12 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             if self.rows:
                 table.move_cursor(row=min(saved, len(self.rows) - 1))
             self.update_detail()
-            self.sub_title = f"{len(self.rows)} role(s)" + (f"  ·  filter: {self.filter_text}" if self.filter_text else "")
+            bits = [f"{len(self.rows)} role(s)"]
+            if self.filter_text:
+                bits.append(f"filter: {self.filter_text}")
+            if self.show_dismissed:
+                bits.append("including dismissed")
+            self.sub_title = "  ·  ".join(bits)
 
         def selected_row(self) -> Any | None:
             table = self.query_one("#table", DataTable)
@@ -390,6 +439,42 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 self.log_line(result)
             self.action_refresh_rows()
 
+        def action_toggle_dismissed(self) -> None:
+            self.show_dismissed = not self.show_dismissed
+            self.action_refresh_rows()
+
+        def action_dismiss(self) -> None:
+            row = self.selected_row()
+            if row is None:
+                self.log_line("[yellow]nothing selected[/]")
+                return
+            company = _get(row, "company", "")
+            try:
+                target = dismiss_blocking(self.cfg, str(_get(row, "job_id", "")))
+            except Exception as exc:  # noqa: BLE001 - reported into the log pane
+                self.log_line(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.log_line(
+                f"dismissed [b]{company}[/] → {target}  "
+                f"[dim]h to show, a to restore[/]"
+            )
+            self.action_refresh_rows()
+
+        def action_delete_role(self) -> None:
+            row = self.selected_row()
+            if row is None:
+                self.log_line("[yellow]nothing selected[/]")
+                return
+            self.push_screen(
+                ConfirmDeleteScreen(str(_get(row, "job_id", "")), str(_get(row, "company", ""))),
+                self.after_delete,
+            )
+
+        def after_delete(self, result: str | None) -> None:
+            if result:
+                self.log_line(result)
+            self.action_refresh_rows()
+
         def action_new_role(self) -> None:
             self.push_screen(NewRoleScreen(), self.after_new_role)
 
@@ -461,6 +546,41 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def finish_stage(self) -> None:
             self.busy = False
             self.action_refresh_rows()
+
+    class ConfirmDeleteScreen(ModalScreen):  # type: ignore[misc]
+        """Deletion is irreversible, so it asks. Dismissal (d) does not."""
+
+        BINDINGS = [
+            Binding("escape,n", "cancel", "Cancel"),
+            Binding("y", "confirm", "Delete"),
+        ]
+
+        def __init__(self, job_id: str, company: str) -> None:
+            super().__init__()
+            self.job_id = job_id
+            self.company = company
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="picker"):
+                yield Static(
+                    f"Permanently delete [b]{self.company}[/], with its scores, "
+                    f"CV paths and outreach drafts?\n\n"
+                    f"[dim]discover may re-add it from its board. To make it stay "
+                    f"gone, press escape and use [b]d[/b] to dismiss instead.[/]\n\n"
+                    f"[b]y[/] delete    [b]n[/] cancel"
+                )
+            yield Footer()
+
+        def action_confirm(self) -> None:
+            try:
+                company = delete_blocking(cfg, self.job_id)
+            except Exception as exc:  # noqa: BLE001 - reported into the log pane
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.dismiss(f"deleted [b]{company}[/]")
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
 
     class StatusScreen(ModalScreen):  # type: ignore[misc]
         """Pick a new status, offering only transitions the tracker allows."""

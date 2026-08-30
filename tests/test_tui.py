@@ -370,3 +370,100 @@ class TestNewScreens:
                 assert len(app.screen_stack) == 1
 
         asyncio.run(scenario())
+
+
+class TestDismissAndDelete:
+    def test_dismiss_marks_withdrawn(self, cfg):
+        from jobsearch.tui import dismiss_blocking
+
+        job_id = seed(cfg)
+        assert dismiss_blocking(cfg, job_id) == "Withdrawn"
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.get_job(job_id)["status"] == "Withdrawn"
+
+    def test_dismiss_survives_rediscovery(self, cfg):
+        """The whole reason dismiss is a status and not a delete.
+
+        A re-discovered posting refreshes its text but must not resurrect a
+        role the user has already said no to.
+        """
+        from jobsearch.models import JobPosting
+        from jobsearch.tui import dismiss_blocking
+
+        job_id = seed(cfg)
+        dismiss_blocking(cfg, job_id)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.upsert_job(
+                JobPosting(
+                    company="Northwind",
+                    title="Director of Engineering, AI",
+                    url="https://example.com/job/1",
+                    location="Amsterdam, Netherlands",
+                    description="Refreshed text from a later sweep.",
+                    job_id=job_id,
+                )
+            )
+            row = tracker.get_job(job_id)
+        assert row["status"] == "Withdrawn", "re-discovery must not undo a dismissal"
+        assert "Refreshed text" in row["description"], "but the posting text should refresh"
+
+    def test_dismiss_falls_back_when_withdrawn_is_not_a_legal_move(self, cfg):
+        """From Rejected only Parked is reachable; dismiss must not blow up."""
+        from jobsearch.tui import dismiss_blocking, set_status_blocking
+
+        job_id = seed(cfg)
+        set_status_blocking(cfg, job_id, "Applied")
+        set_status_blocking(cfg, job_id, "Rejected")
+        assert dismiss_blocking(cfg, job_id) == "Parked"
+
+    def test_dismissing_twice_is_harmless(self, cfg):
+        from jobsearch.tui import dismiss_blocking
+
+        job_id = seed(cfg)
+        dismiss_blocking(cfg, job_id)
+        assert dismiss_blocking(cfg, job_id) == "already dismissed"
+
+    def test_delete_removes_the_row(self, cfg):
+        from jobsearch.tui import delete_blocking
+
+        job_id = seed(cfg)
+        assert delete_blocking(cfg, job_id) == "Northwind"
+        with Tracker.from_config(cfg) as tracker:
+            assert tracker.get_job(job_id) is None
+
+    def test_dismissed_roles_are_hidden_until_toggled(self, cfg):
+        from jobsearch.tui import dismiss_blocking
+
+        keep = seed(cfg, company="Northwind")
+        drop = seed(cfg, company="Irrelevant Corp", title="VP Sales")
+        dismiss_blocking(cfg, drop)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                from textual.widgets import DataTable
+
+                table = app.query_one("#table", DataTable)
+                assert table.row_count == 1
+                app.action_toggle_dismissed()
+                await pilot.pause()
+                assert app.query_one("#table", DataTable).row_count == 2
+
+        asyncio.run(scenario())
+
+    def test_delete_asks_before_destroying(self, cfg):
+        """x opens a confirmation; it must not delete on the keypress alone."""
+        job_id = seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.action_delete_role()
+                await pilot.pause()
+                assert len(app.screen_stack) == 2
+                with Tracker.from_config(cfg) as tracker:
+                    assert tracker.get_job(job_id) is not None, "not deleted yet"
+
+        asyncio.run(scenario())
