@@ -208,6 +208,11 @@ Shift in most Linux terminals).
 prompts say so and the hardening step enforces it, because asking a model not
 to reach for an em dash does not reliably stop it.
 
+**Rejected roles sink, dismissed roles hide.** A rejection is history worth
+keeping, so it stays in the table, dimmed and sorted below everything still in
+play; the subtitle counts live and closed separately. A role you dismissed is
+one you never wanted, so it disappears until `h`.
+
 **Dismiss (`d`) rather than delete (`x`).** Dismissing sets a status, and
 `upsert_job` never clobbers the status of an existing job — so a dismissed role
 stays dismissed the next time `discover` sweeps its board. A deleted one comes

@@ -133,6 +133,17 @@ def add_role_blocking(
 
 DISMISSED_STATUS = Status.WITHDRAWN
 
+#: Statuses that end a role's life. They stay visible - a rejection is history
+#: worth keeping - but they sort below everything still in play.
+CLOSED_STATUSES: frozenset[str] = frozenset(
+    {Status.REJECTED.value, Status.WITHDRAWN.value}
+)
+
+
+def is_closed(row: Any) -> bool:
+    """True for a role that is over, however it ended."""
+    return str(_get(row, "status", "")) in CLOSED_STATUSES
+
 
 def dismiss_blocking(cfg: Config, job_id: str) -> str:
     """Mark a role as not being pursued, stickily.
@@ -904,6 +915,10 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.outreach_ids = tracker_outreach_ids(self.cfg)
             if not self.show_dismissed:
                 rows = [r for r in rows if str(_get(r, "status", "")) != DISMISSED_STATUS.value]
+            # Stable sort: the query already orders by score, so sorting on
+            # "is it closed" alone sinks finished roles without disturbing the
+            # ranking within each group.
+            rows.sort(key=is_closed)
             needle = self.filter_text.strip().lower()
             if needle:
                 rows = [
@@ -920,9 +935,10 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             table.clear()
             self.rows = self.load_rows()
             for row in self.rows:
+                dim = "[dim]{}[/]".format if is_closed(row) else (lambda text: text)
                 table.add_row(
-                    truncate(_get(row, "company", ""), 20),
-                    truncate(_get(row, "title", ""), 32),
+                    dim(truncate(_get(row, "company", ""), 20)),
+                    dim(truncate(_get(row, "title", ""), 32)),
                     location_cell(row, self.cfg),
                     "[green]✓[/]" if (_get(row, "cv_pdf_path") or _get(row, "cv_html_path")) else "[dim]·[/]",
                     "[green]✓[/]" if str(_get(row, "job_id", "")) in self.outreach_ids else "[dim]·[/]",
@@ -932,7 +948,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             if self.rows:
                 table.move_cursor(row=min(saved, len(self.rows) - 1))
             self.update_detail()
-            bits = [f"{len(self.rows)} role(s)"]
+            closed = sum(1 for row in self.rows if is_closed(row))
+            live = len(self.rows) - closed
+            bits = [f"{live} live" + (f", {closed} closed" if closed else "")]
             if self.filter_text:
                 bits.append(f"filter: {self.filter_text}")
             if self.show_dismissed:

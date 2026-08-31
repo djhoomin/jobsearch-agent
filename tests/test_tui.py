@@ -1497,3 +1497,81 @@ class TestLetterRendering:
 
         job_id, _ = self._with_letter(cfg, body="Hi [name],\n\nRegards.\n")
         assert "\\[name]" in role_detail_markup(cfg, job_id)
+
+
+class TestClosedRolesSortLast:
+    """A rejection is history worth keeping, but it should not sit above roles
+    still in play. Dismissed roles are hidden; rejected ones sink.
+    """
+
+    def test_rejected_sinks_below_live_roles(self, cfg):
+        from jobsearch.tui import set_status_blocking
+
+        live = seed(cfg, company="Live Co", title="Open Role")
+        dead = seed(cfg, company="Dead Co", title="Closed Role")
+        set_status_blocking(cfg, dead, "Applied")
+        set_status_blocking(cfg, dead, "Rejected")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                companies = [str(r["company"]) for r in app.rows]
+                assert companies.index("Live Co") < companies.index("Dead Co")
+
+        asyncio.run(scenario())
+
+    def test_a_rejected_role_stays_visible(self, cfg):
+        """Unlike dismissal, rejection is not a reason to hide it."""
+        from jobsearch.tui import set_status_blocking
+
+        job_id = seed(cfg, company="Dead Co")
+        set_status_blocking(cfg, job_id, "Applied")
+        set_status_blocking(cfg, job_id, "Rejected")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert any(str(r["company"]) == "Dead Co" for r in app.rows)
+
+        asyncio.run(scenario())
+
+    def test_ranking_within_the_live_group_is_untouched(self, cfg):
+        """The sort must not disturb the score ordering the query produced."""
+        from jobsearch.models import ScoreReport
+        from jobsearch.tui import is_closed
+
+        rows = [
+            {"status": "Applied", "score_weighted": 4.0},
+            {"status": "Rejected", "score_weighted": 4.5},
+            {"status": "Not started", "score_weighted": 3.0},
+        ]
+        rows.sort(key=is_closed)
+        assert [r["score_weighted"] for r in rows] == [4.0, 3.0, 4.5]
+
+    def test_is_closed_covers_both_endings(self):
+        from jobsearch.tui import is_closed
+
+        assert is_closed({"status": "Rejected"})
+        assert is_closed({"status": "Withdrawn"})
+        assert not is_closed({"status": "Applied"})
+        assert not is_closed({"status": "Offer"})
+        assert not is_closed({})
+
+    def test_the_subtitle_counts_live_and_closed_separately(self, cfg):
+        from jobsearch.tui import set_status_blocking
+
+        seed(cfg, company="Live Co")
+        dead = seed(cfg, company="Dead Co", title="Closed Role")
+        set_status_blocking(cfg, dead, "Applied")
+        set_status_blocking(cfg, dead, "Rejected")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert "1 live" in app.sub_title
+                assert "1 closed" in app.sub_title
+
+        asyncio.run(scenario())
