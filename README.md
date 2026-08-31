@@ -20,7 +20,7 @@ rubric, and one set of hard constraints, all in `config.local.toml` and
 repointable at someone else's.
 
 The most valuable thing in here is not the CV generation. It is
-[the ATS verifier](#4-verify-the-ats-verifier) — the check that a beautiful
+[the ATS verifier](#5-verify-the-ats-verifier) — the check that a beautiful
 PDF is still a machine-readable one. Three of the first four CVs it was pointed
 at failed, each for a different reason, and none of the failures were visible by
 looking at the PDF.
@@ -69,10 +69,13 @@ and non-compete status) that should never reach a remote. The committed
 `config.example.toml` is a placeholder template and is never loaded
 automatically.
 
-### Claude API credentials
+### Model provider and credentials
 
-The client is constructed zero-arg, so it picks up whatever the environment
-already has:
+Two providers are supported. `anthropic` is the default and needs nothing in
+the config.
+
+**Anthropic (default).** The client is constructed zero-arg, so it picks up
+whatever the environment already has:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -80,9 +83,37 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ant auth login
 ```
 
-No key is ever read from, written to, or prompted for by this code. Everything
-except the four Claude-backed stages (`score`, `tailor`, `outreach`, `run`)
-works with no credentials at all — including the entire ATS verifier.
+**Any OpenAI-compatible endpoint** — OpenRouter, Together, Groq, a local vLLM
+or Ollama:
+
+```bash
+pip install -e '.[openai]'
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+```toml
+[claude]
+provider    = "openai_compatible"
+base_url    = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model       = "anthropic/claude-opus-4.1"
+# optional, some endpoints want identifying headers
+extra_headers = { "HTTP-Referer" = "https://github.com/you/jobsearch-agent" }
+```
+
+Or set it in the TUI: `,` then the **Model and provider** group. Switching to
+`openai_compatible` without a `base_url` is refused before anything is written.
+
+The two paths are siblings, not a shim over one another: Anthropic keeps its
+native SDK, structured outputs and explicit `cache_control`. What you give up
+on the OpenAI path is covered under [Cost](#cost) — read it before switching,
+because a nominally cheaper model can cost more per role.
+
+No key is ever read from, written to, or prompted for by this code; the
+OpenAI-compatible path names an environment variable rather than storing a key
+in the config. Everything except the five model-backed stages (`score`,
+`tailor`, `letter`, `outreach`, `run`) works with no credentials at all,
+including the entire ATS verifier.
 
 ---
 
@@ -311,7 +342,33 @@ jobsearch tailor northwind-director --no-render  # HTML only
 Output lands in `output/cv/`. Your source documents are opened read-only and
 never written to.
 
-### 4. `verify` — the ATS verifier
+### 4. `letter`
+
+```bash
+jobsearch letter northwind-director
+jobsearch letter northwind-director --instruction "lead on the FDE angle"
+```
+
+A short cover letter, 200-280 words, written against the posting and the
+dossier. `b` in the TUI, `B` copies it.
+
+Audited by the same grounding check the CV gets, because a letter is where
+invented detail is easiest to write and hardest to notice. On a real run it
+caught the letter volunteering agreement to a travel percentage that appeared
+nowhere in the fact base.
+
+The prompt is mostly a list of things not to do: no "I am writing to apply
+for", no slogans that disparage absent third parties, at most three numbers,
+credit the team where the work was shared, and one genuine question about the
+role. Those six rules are the difference between confident and arrogant, and
+they are pinned by a test.
+
+Writes to `output/letters/Cover_Letter_<Company>_<Role>_<id>.txt`. The filename
+carries a role discriminator: one employer can have the same job title open in
+three cities, and naming by company alone means the second letter silently
+overwrites the first.
+
+### 5. `verify` — the ATS verifier
 
 Runnable standalone against any PDF. It reads the **text layer** with `pypdf` —
 the same thing an ATS parser sees — and asserts seven properties. Each one was
@@ -339,7 +396,7 @@ The test suite renders two fixture CVs with real headless Chrome: an
 ATS-hardened one that must pass everything, and one carrying all five defects
 above that must fail every corresponding check.
 
-### 5. `outreach`
+### 6. `outreach`
 
 Infers the likely contact **roles** for this company and posting, emits a
 LinkedIn **search URL you click yourself**, and drafts a connection note
@@ -354,7 +411,7 @@ jobsearch outreach northwind-director --gmail-draft --to person@example.com
 `--gmail-draft` creates a Gmail **draft**. There is no send path in this
 codebase.
 
-### 6. `track` / `status` / `show` / `export`
+### 7. `track` / `status` / `show` / `export`
 
 SQLite (`output/jobsearch.db`) is the source of truth: job, company, source URL,
 discovery date, weighted score plus the per-dimension breakdown, status, CV
@@ -383,7 +440,7 @@ extra `Jobs (jobsearch-agent)` sheet — into `output/`. It reads your file only
 to learn its header row, so a column you added is followed rather than
 overwritten, and **it refuses outright to write over your own tracker**.
 
-### 7. `run` — agentic end to end
+### 8. `run` — agentic end to end
 
 Hands the stages to Claude as tools via the SDK's Tool Runner and lets it work
 one role from URL to tracked application, deciding the order and the stopping
@@ -396,6 +453,20 @@ jobsearch run northwind-director --instruction "Aim outreach at the founder, not
 ```
 
 ---
+
+### `attach-cv`
+
+```bash
+jobsearch attach-cv northwind-director ~/Documents/CV_Northwind.pdf
+```
+
+Records a CV you made by hand against a role, picks up a sibling `.html`, runs
+the verifier on it and stores the report. `c` on the role page opens a picker of
+CVs already on disk, newest first.
+
+Worth pointing at your existing CVs: of the first four this was aimed at, three
+failed the verifier, each for a different reason, and none of the failures were
+visible by looking at the PDF.
 
 ## What this deliberately does NOT do
 
@@ -447,7 +518,8 @@ own directory, so nothing is bound to one machine.
 
 ```toml
 [paths]                      # your source documents
-[claude]                     # model, token budgets, cache TTL
+[claude]                     # provider, model, token budgets, cache TTL
+[claude.stages]              # optional per-stage model and effort overrides
 [constraints]                # the five hard filters
 [weights]                    # the rubric; must sum to 1.0 or startup fails
 [ats]                        # page limit, required headings, nowrap keywords
@@ -460,6 +532,11 @@ own directory, so nothing is bound to one machine.
 
 Point it elsewhere with `jobsearch --config /path/to/config.local.toml` or
 `JOBSEARCH_CONFIG`.
+
+`config.local.toml` is gitignored; `config.example.toml` is the committed
+template that `jobsearch setup` fills in. Most of it is editable from the TUI
+with `,` — including the provider — and edits are written back in place, so the
+file keeps its comments.
 
 Adding a target company:
 
@@ -483,25 +560,16 @@ A Claude Pro/Max subscription does not cover this: it calls the Anthropic API
 directly, so usage bills to the API platform whether you authenticate with
 `ANTHROPIC_API_KEY` or an `ant auth login` profile.
 
-**Any OpenAI-compatible endpoint** works as an alternative — OpenRouter,
-Together, Groq, a local vLLM or Ollama:
+**[Another provider](#model-provider-and-credentials)** is an option, but read
+what it costs first. On an OpenAI-compatible endpoint you lose explicit prompt
+caching, so the ~27KB dossier prefix is resent on every call — a nominally
+cheaper model can therefore cost *more* per role than cached Opus. You also
+lose guaranteed structured output, since endpoints vary in whether they honour
+`response_format`; a JSON object is extracted from the text as a fallback. The
+option earns its place for genuinely different models, such as a local one for
+the cheap stages, rather than as a cheaper route to the same model.
 
-```toml
-[claude]
-provider    = "openai_compatible"
-base_url    = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-model       = "anthropic/claude-opus-4.1"
-```
-
-Needs `pip install -e '.[openai]'`. The Anthropic path keeps its native SDK, so
-nothing is downgraded by the option existing. Two things you give up by taking
-it: explicit prompt caching — the ~27KB dossier prefix is resent on every call,
-so a nominally cheaper model can cost *more* per role — and guaranteed
-structured output, since endpoints vary in whether they honour
-`response_format`.
-
-What is available instead:
+What is available on either provider:
 
 - **Prompt caching**, below — the dossier and base CV are a large stable prefix,
   and caching them is the single biggest saving.
@@ -632,7 +700,7 @@ src/jobsearch/
 [MIT](LICENSE) — © 2026 DJ Human.
 
 Use it, fork it, ship it. The one thing worth lifting on its own is
-[the ATS verifier](#4-verify-the-ats-verifier): it needs only `pypdf` and a
+[the ATS verifier](#5-verify-the-ats-verifier): it needs only `pypdf` and a
 headless Chrome, and it will tell you things about your own CV that looking at
 it will not.
 
