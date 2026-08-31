@@ -159,6 +159,41 @@ def is_in_flight(row: Any) -> bool:
     return str(_get(row, "status", "")) in IN_FLIGHT_STATUSES
 
 
+#: Sort order for the table: what needs attention first, what is over last.
+#: Live applications lead because they are time sensitive, the untouched
+#: backlog follows because it is what you act on next, and anything you have
+#: deliberately set aside sits below both.
+STATUS_RANK: dict[str, int] = {
+    Status.OFFER.value: 0,
+    Status.INTERVIEWING.value: 1,
+    Status.IN_CONVERSATION.value: 2,
+    Status.APPLIED.value: 3,
+    Status.OUTREACH_SENT.value: 4,
+    Status.NOT_STARTED.value: 5,
+    Status.PARKED.value: 6,
+    Status.REJECTED.value: 7,
+    Status.WITHDRAWN.value: 8,
+}
+
+
+def sort_key(row: Any) -> tuple[Any, ...]:
+    """Order by where a role sits in the process, then score, then company.
+
+    Score descending with unscored last, so an unscored role never outranks a
+    scored one inside its group. Company name breaks the tie so the order is
+    stable between refreshes rather than depending on insertion order.
+    """
+    rank = STATUS_RANK.get(str(_get(row, "status", "")), len(STATUS_RANK))
+    score = _get(row, "score_weighted")
+    return (
+        rank,
+        0 if score is not None else 1,
+        -float(score) if score is not None else 0.0,
+        str(_get(row, "company", "")).lower(),
+        str(_get(row, "title", "")).lower(),
+    )
+
+
 def dismiss_blocking(cfg: Config, job_id: str) -> str:
     """Mark a role as not being pursued, stickily.
 
@@ -932,10 +967,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.outreach_ids = tracker_outreach_ids(self.cfg)
             if not self.show_dismissed:
                 rows = [r for r in rows if str(_get(r, "status", "")) != DISMISSED_STATUS.value]
-            # Stable sort: the query already orders by score, so sorting on
-            # "is it closed" alone sinks finished roles without disturbing the
-            # ranking within each group.
-            rows.sort(key=is_closed)
+            rows.sort(key=sort_key)
             needle = self.filter_text.strip().lower()
             if needle:
                 rows = [

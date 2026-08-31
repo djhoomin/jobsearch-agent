@@ -213,6 +213,19 @@ a glance: `180 live, 23 applied, 2 closed`. "Applied" means an application is
 actually out with someone - Applied, In conversation, Interviewing or Offer -
 so a rejection stops being counted even though you did apply for it.
 
+**Ordering.** Lifecycle stage first, then score, then company name:
+
+```
+Offer · Interviewing · In conversation · Applied · Outreach sent
+      · Not started · Parked · Rejected · Withdrawn
+```
+
+Live applications lead because they are time sensitive, the untouched backlog
+follows because it is what you act on next, and anything deliberately set aside
+sits below both. Within a stage, score descending with unscored last, so an
+unscored role never outranks a scored one beside it. Company name breaks the
+tie, so the order is stable between refreshes.
+
 **Rejected roles sink, dismissed roles hide.** A rejection is history worth
 keeping, so it stays in the table, dimmed and sorted below everything still in
 play; the subtitle counts live and closed separately. A role you dismissed is

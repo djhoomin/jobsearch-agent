@@ -1648,3 +1648,81 @@ class TestRowNumbersAndCounts:
             assert is_in_flight({"status": status}), status
         for status in ("Not started", "Parked", "Rejected", "Withdrawn"):
             assert not is_in_flight({"status": status}), status
+
+
+class TestDefaultOrdering:
+    """Lifecycle stage first, then score, then company. A parked role sitting
+    among live applications is the thing this fixes.
+    """
+
+    def _row(self, status, score=None, company="Co", title="Role"):
+        return {"status": status, "score_weighted": score, "company": company, "title": title}
+
+    def test_stage_beats_score(self, cfg):
+        from jobsearch.tui import sort_key
+
+        rows = [
+            self._row("Parked", 5.0, "Parked Co"),
+            self._row("Applied", 1.0, "Applied Co"),
+        ]
+        rows.sort(key=sort_key)
+        assert [r["company"] for r in rows] == ["Applied Co", "Parked Co"]
+
+    def test_the_full_lifecycle_order(self):
+        from jobsearch.tui import sort_key
+
+        statuses = ["Withdrawn", "Rejected", "Parked", "Not started",
+                    "Outreach sent", "Applied", "In conversation",
+                    "Interviewing", "Offer"]
+        rows = [self._row(s) for s in statuses]
+        rows.sort(key=sort_key)
+        assert [r["status"] for r in rows] == [
+            "Offer", "Interviewing", "In conversation", "Applied",
+            "Outreach sent", "Not started", "Parked", "Rejected", "Withdrawn",
+        ]
+
+    def test_score_orders_within_a_stage(self):
+        from jobsearch.tui import sort_key
+
+        rows = [self._row("Applied", 3.0, "Low"), self._row("Applied", 4.5, "High")]
+        rows.sort(key=sort_key)
+        assert [r["company"] for r in rows] == ["High", "Low"]
+
+    def test_unscored_sinks_within_its_stage(self):
+        """An unscored role must never outrank a scored one beside it."""
+        from jobsearch.tui import sort_key
+
+        rows = [self._row("Applied", None, "Unscored"), self._row("Applied", 1.0, "Scored")]
+        rows.sort(key=sort_key)
+        assert [r["company"] for r in rows] == ["Scored", "Unscored"]
+
+    def test_company_breaks_the_tie(self):
+        """Stable between refreshes rather than dependent on insertion order."""
+        from jobsearch.tui import sort_key
+
+        rows = [self._row("Applied", 4.0, "Zeta"), self._row("Applied", 4.0, "Alpha")]
+        rows.sort(key=sort_key)
+        assert [r["company"] for r in rows] == ["Alpha", "Zeta"]
+
+    def test_an_unknown_status_sorts_last_rather_than_crashing(self):
+        from jobsearch.tui import sort_key
+
+        rows = [self._row("Something New"), self._row("Applied")]
+        rows.sort(key=sort_key)
+        assert rows[0]["status"] == "Applied"
+
+    def test_a_parked_role_lands_below_the_backlog_in_the_app(self, cfg):
+        from jobsearch.tui import set_status_blocking
+
+        parked = seed(cfg, company="Parked Co", title="Parked Role")
+        seed(cfg, company="Backlog Co", title="Untouched Role")
+        set_status_blocking(cfg, parked, "Parked")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                companies = [str(r["company"]) for r in app.rows]
+                assert companies.index("Backlog Co") < companies.index("Parked Co")
+
+        asyncio.run(scenario())
