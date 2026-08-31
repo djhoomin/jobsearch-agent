@@ -140,9 +140,23 @@ CLOSED_STATUSES: frozenset[str] = frozenset(
 )
 
 
+#: Statuses meaning an application is actually out with an employer.
+IN_FLIGHT_STATUSES: frozenset[str] = frozenset({
+    Status.APPLIED.value,
+    Status.IN_CONVERSATION.value,
+    Status.INTERVIEWING.value,
+    Status.OFFER.value,
+})
+
+
 def is_closed(row: Any) -> bool:
     """True for a role that is over, however it ended."""
     return str(_get(row, "status", "")) in CLOSED_STATUSES
+
+
+def is_in_flight(row: Any) -> bool:
+    """True once an application is out and has not been closed."""
+    return str(_get(row, "status", "")) in IN_FLIGHT_STATUSES
 
 
 def dismiss_blocking(cfg: Config, job_id: str) -> str:
@@ -898,6 +912,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def on_mount(self) -> None:
             table = self.query_one("#table", DataTable)
             table.add_columns("Company", "Title", "Location", "CV", "Out", "Score", "Status")
+            # Row numbers live in the label gutter rather than a column, so
+            # they cost no width and do not shift when columns resize.
+            table.show_row_labels = True
             table.focus()
             self.title = "jobsearch"
             self.sub_title = str(self.cfg.source or self.cfg.root)
@@ -934,7 +951,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             saved = table.cursor_row
             table.clear()
             self.rows = self.load_rows()
-            for row in self.rows:
+            for index, row in enumerate(self.rows, start=1):
                 dim = "[dim]{}[/]".format if is_closed(row) else (lambda text: text)
                 table.add_row(
                     dim(truncate(_get(row, "company", ""), 20)),
@@ -944,13 +961,20 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                     "[green]✓[/]" if str(_get(row, "job_id", "")) in self.outreach_ids else "[dim]·[/]",
                     score_cell(row),
                     f"{status_glyph(str(_get(row, 'status', '')))} {_get(row, 'status', '')}",
+                    label=str(index),
                 )
             if self.rows:
                 table.move_cursor(row=min(saved, len(self.rows) - 1))
             self.update_detail()
             closed = sum(1 for row in self.rows if is_closed(row))
+            in_flight = sum(1 for row in self.rows if is_in_flight(row))
             live = len(self.rows) - closed
-            bits = [f"{live} live" + (f", {closed} closed" if closed else "")]
+            counts = f"{live} live"
+            if in_flight:
+                counts += f", {in_flight} applied"
+            if closed:
+                counts += f", {closed} closed"
+            bits = [counts]
             if self.filter_text:
                 bits.append(f"filter: {self.filter_text}")
             if self.show_dismissed:

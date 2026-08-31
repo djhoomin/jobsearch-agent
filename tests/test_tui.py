@@ -1575,3 +1575,76 @@ class TestClosedRolesSortLast:
                 assert "1 closed" in app.sub_title
 
         asyncio.run(scenario())
+
+
+class TestRowNumbersAndCounts:
+    def test_rows_are_numbered_from_one(self, cfg):
+        for i in range(3):
+            seed(cfg, company=f"Co {i}", title=f"Role {i}")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                from textual.widgets import DataTable
+
+                table = app.query_one("#table", DataTable)
+                assert table.show_row_labels
+                assert [str(r.label) for r in table.rows.values()] == ["1", "2", "3"]
+
+        asyncio.run(scenario())
+
+    def test_numbering_follows_the_filter(self, cfg):
+        """Numbers count what is on screen, not the whole database."""
+        seed(cfg, company="Keep Co")
+        seed(cfg, company="Drop Co", title="Other")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.filter_text = "keep"
+                app.action_refresh_rows()
+                await pilot.pause()
+                from textual.widgets import DataTable
+
+                table = app.query_one("#table", DataTable)
+                assert [str(r.label) for r in table.rows.values()] == ["1"]
+
+        asyncio.run(scenario())
+
+    def test_the_subtitle_counts_applications_in_flight(self, cfg):
+        from jobsearch.tui import set_status_blocking
+
+        seed(cfg, company="Untouched")
+        applied = seed(cfg, company="Applied Co", title="A")
+        interviewing = seed(cfg, company="Interviewing Co", title="B")
+        set_status_blocking(cfg, applied, "Applied")
+        set_status_blocking(cfg, interviewing, "Applied")
+        set_status_blocking(cfg, interviewing, "Interviewing")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert "2 applied" in app.sub_title, app.sub_title
+
+        asyncio.run(scenario())
+
+    def test_a_rejected_role_is_not_counted_as_in_flight(self, cfg):
+        """It was applied for, but it is no longer out with anyone."""
+        from jobsearch.tui import is_in_flight, set_status_blocking
+
+        job_id = seed(cfg)
+        set_status_blocking(cfg, job_id, "Applied")
+        set_status_blocking(cfg, job_id, "Rejected")
+        with Tracker.from_config(cfg) as tracker:
+            assert not is_in_flight(tracker.get_job(job_id))
+
+    def test_in_flight_covers_the_later_stages(self):
+        from jobsearch.tui import is_in_flight
+
+        for status in ("Applied", "In conversation", "Interviewing", "Offer"):
+            assert is_in_flight({"status": status}), status
+        for status in ("Not started", "Parked", "Rejected", "Withdrawn"):
+            assert not is_in_flight({"status": status}), status

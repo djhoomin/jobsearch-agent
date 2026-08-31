@@ -208,6 +208,11 @@ Shift in most Linux terminals).
 prompts say so and the hardening step enforces it, because asking a model not
 to reach for an em dash does not reliably stop it.
 
+Rows are numbered in the label gutter, and the subtitle counts what matters at
+a glance: `180 live, 23 applied, 2 closed`. "Applied" means an application is
+actually out with someone - Applied, In conversation, Interviewing or Offer -
+so a rejection stops being counted even though you did apply for it.
+
 **Rejected roles sink, dismissed roles hide.** A rejection is history worth
 keeping, so it stays in the table, dimmed and sorted below everything still in
 play; the subtitle counts live and closed separately. A role you dismissed is
