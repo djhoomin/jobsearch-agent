@@ -317,3 +317,54 @@ class TestAshbyLocation:
 
         job = {"location": "Paris", "secondaryLocations": [{"location": "Amsterdam"}]}
         assert location_cell({"location": ashby_location(job)}, cfg).startswith("✓")
+
+
+class TestTitleRequireAny:
+    """Seniority words alone are ambiguous. 'Staff Software Engineer - Backend'
+    and 'Staff Applied AI Researcher' both match 'staff'; only one is the job.
+    """
+
+    INCLUDE = ["staff", "principal", "director", "head of", "forward deployed"]
+    REQUIRE = ["ai", "ml", "research", "forward deployed", "solutions", "director", "product"]
+
+    def _match(self, title, require=None):
+        from jobsearch.discover.sources import title_matches
+
+        return title_matches(title, self.INCLUDE, [], self.REQUIRE if require is None else require)
+
+    def test_generic_platform_engineering_is_dropped(self):
+        for title in (
+            "Staff Software Engineer - Backend",
+            "Senior Staff Software Engineer - Delta",
+            "Principal Software Engineer - Postgres",
+            "Principal Engineer - Privacy",
+        ):
+            assert not self._match(title), title
+
+    def test_ai_flavoured_seniority_is_kept(self):
+        for title in (
+            "Staff / Principal Applied AI Researcher (Agentic Search)",
+            "Principal Software Engineer - AI Poland",
+            "Forward Deployed Engineer",
+            "Director of Product & Engineering",
+        ):
+            assert self._match(title), title
+
+    def test_it_matches_on_word_boundaries(self):
+        """'ai' must not fire on 'maintain', 'ml' must not fire on 'html'."""
+        assert not self._match("Staff Engineer - Maintenance Tooling")
+        assert not self._match("Principal Engineer, HTML Rendering")
+
+    def test_an_empty_require_list_disables_the_gate(self):
+        assert self._match("Staff Software Engineer - Backend", require=[])
+
+    def test_exclude_still_wins_over_everything(self):
+        from jobsearch.discover.sources import title_matches
+
+        assert not title_matches(
+            "Junior AI Researcher", self.INCLUDE + ["junior"], ["junior"], self.REQUIRE
+        )
+
+    def test_include_is_still_required(self):
+        """The gate narrows; it does not admit titles the include list rejects."""
+        assert not self._match("Data Analyst")

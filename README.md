@@ -556,7 +556,7 @@ own directory, so nothing is bound to one machine.
 [weights]                    # the rubric; must sum to 1.0 or startup fails
 [ats]                        # page limit, required headings, nowrap keywords
 [render]                     # Chrome binary and flags
-[discover]                   # User-Agent, rate limit, title filters
+[discover]                   # User-Agent, rate limit, title filters + subject gate
 [[discover.boards]]          # company -> ATS board mapping (extend freely)
 [outreach]                   # contact titles, character caps
 [google]                     # optional sync, off by default

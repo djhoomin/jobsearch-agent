@@ -357,22 +357,43 @@ def fetch_board(board: BoardRef, fetcher: Fetcher) -> list[JobPosting]:
 # ---------------------------------------------------------------------------
 
 
-def title_matches(title: str, include: Iterable[str], exclude: Iterable[str]) -> bool:
-    """Cheap pre-filter so only plausible roles reach the (paid) scorer."""
+def title_matches(
+    title: str,
+    include: Iterable[str],
+    exclude: Iterable[str],
+    require_any: Iterable[str] = (),
+) -> bool:
+    """Cheap pre-filter so only plausible roles reach the (paid) scorer.
+
+    ``require_any`` is a second gate, applied after ``include``. Seniority
+    words alone are ambiguous: "Staff Software Engineer - Backend" and "Staff
+    Applied AI Researcher" both match "staff", but only one is the job you
+    want. Requiring at least one subject-matter word separates them without
+    having to enumerate every platform speciality in ``exclude``.
+
+    Matched on word boundaries, so "ai" does not fire on "maintain" or
+    "Ukraine", and "ml" does not fire on "html".
+    """
     needle = (title or "").lower()
     if any(term.lower() in needle for term in exclude):
         return False
     include = list(include)
-    if not include:
-        return True
-    return any(term.lower() in needle for term in include)
+    if include and not any(term.lower() in needle for term in include):
+        return False
+    require_any = [t.lower() for t in require_any if t.strip()]
+    if require_any and not any(
+        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", needle) for term in require_any
+    ):
+        return False
+    return True
 
 
 def filter_postings(postings: Iterable[JobPosting], cfg: Config) -> list[JobPosting]:
     section = cfg.section("discover")
     include = section.get("title_include", [])
     exclude = section.get("title_exclude", [])
-    return [p for p in postings if title_matches(p.title, include, exclude)]
+    require_any = section.get("title_require_any", [])
+    return [p for p in postings if title_matches(p.title, include, exclude, require_any)]
 
 
 # ---------------------------------------------------------------------------
