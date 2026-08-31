@@ -32,8 +32,8 @@ def seed(cfg, **overrides) -> str:
         company=overrides.pop("company", "Northwind"),
         title=overrides.pop("title", "Director of Engineering, AI"),
         url="https://example.com/job/1",
-        location="Amsterdam, Netherlands",
-        description="We need someone to run the AI team.",
+        location=overrides.pop("location", "Amsterdam, Netherlands"),
+        description=overrides.pop("description", "We need someone to run the AI team."),
         **overrides,
     )
     with Tracker.from_config(cfg) as tracker:
@@ -471,7 +471,7 @@ class TestDismissAndDelete:
 
                 table = app.query_one("#table", DataTable)
                 assert table.row_count == 1
-                app.action_toggle_dismissed()
+                app.action_toggle_hidden()
                 await pilot.pause()
                 assert app.query_one("#table", DataTable).row_count == 2
 
@@ -1724,5 +1724,68 @@ class TestDefaultOrdering:
                 await pilot.pause()
                 companies = [str(r["company"]) for r in app.rows]
                 assert companies.index("Backlog Co") < companies.index("Parked Co")
+
+        asyncio.run(scenario())
+
+
+class TestLocationFilter:
+    """Most of a large backlog is roles you can never take. They are hidden by
+    default, but engaging with one overrides that.
+    """
+
+    def test_an_untouched_us_role_is_hidden(self, cfg):
+        from jobsearch.tui import is_hidden
+
+        job_id = seed(cfg, company="US Co", title="Director", location="Remote - United States")
+        with Tracker.from_config(cfg) as tracker:
+            assert is_hidden(tracker.get_job(job_id), cfg)
+
+    def test_a_workable_role_is_not_hidden(self, cfg):
+        from jobsearch.tui import is_hidden
+
+        job_id = seed(cfg, location="Amsterdam, Netherlands")
+        with Tracker.from_config(cfg) as tracker:
+            assert not is_hidden(tracker.get_job(job_id), cfg)
+
+    def test_an_unclassifiable_location_stays_visible(self, cfg):
+        """A '?' is a question to ask, not an answer. Mistral labels EMEA roles
+        by office city, and those turned out to be workable."""
+        from jobsearch.tui import is_hidden
+
+        job_id = seed(cfg, company="Vague Co", title="Lead", location="CET, GMT or EST timezones")
+        with Tracker.from_config(cfg) as tracker:
+            assert not is_hidden(tracker.get_job(job_id), cfg)
+
+    def test_applying_to_a_blocked_location_overrides_the_filter(self, cfg):
+        """If you applied to something outside the EU on purpose, that decision
+        is yours and the table must keep showing it."""
+        from jobsearch.tui import is_hidden, set_status_blocking
+
+        job_id = seed(cfg, company="US Co", title="Director", location="Remote - United States")
+        set_status_blocking(cfg, job_id, "Applied")
+        with Tracker.from_config(cfg) as tracker:
+            assert not is_hidden(tracker.get_job(job_id), cfg)
+
+    def test_a_missing_location_is_not_grounds_for_hiding(self, cfg):
+        from jobsearch.tui import is_hidden
+
+        job_id = seed(cfg, company="No Location Co", title="Lead", location="")
+        with Tracker.from_config(cfg) as tracker:
+            assert not is_hidden(tracker.get_job(job_id), cfg)
+
+    def test_h_reveals_them_and_the_subtitle_counts_them(self, cfg):
+        seed(cfg, company="Keep Co", location="Amsterdam, Netherlands")
+        seed(cfg, company="US Co", title="Other", location="Remote - United States")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert len(app.rows) == 1
+                assert "1 hidden" in app.sub_title
+                await pilot.press("h")
+                await pilot.pause()
+                assert len(app.rows) == 2
+                assert "including hidden" in app.sub_title
 
         asyncio.run(scenario())

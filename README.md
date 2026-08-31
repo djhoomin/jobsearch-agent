@@ -153,7 +153,7 @@ behaviour cannot drift between the two.
 | `n` | Add a role you found yourself |
 | `d` | Dismiss an irrelevant role — hidden, and it stays dismissed |
 | `x` | Delete permanently (asks first) |
-| `h` | Show dismissed roles again |
+| `h` | Show hidden roles (dismissed, and location-eliminated) |
 | `/` | Filter by company or title (`esc` clears) |
 | `,` | Settings: title filters, constraints, rubric weights, model and provider |
 | `r` | Reload from the tracker |
@@ -225,6 +225,15 @@ follows because it is what you act on next, and anything deliberately set aside
 sits below both. Within a stage, score descending with unscored last, so an
 unscored role never outranks a scored one beside it. Company name breaks the
 tie, so the order is stable between refreshes.
+
+**Hidden by default: dismissed roles, and untouched roles the location
+constraint eliminates.** A large backlog is mostly roles you can never take, so
+`✗` rows do not compete for attention with the ones you can. Two deliberate
+exceptions: an unclassifiable `?` location stays visible, because a question is
+not an answer and EMEA roles are often labelled by office city; and engaging
+with a role overrides the filter, so if you applied somewhere outside the EU on
+purpose it keeps showing. `h` reveals everything, and the subtitle counts what
+is hidden.
 
 **Rejected roles sink, dismissed roles hide.** A rejection is history worth
 keeping, so it stays in the table, dimmed and sorted below everything still in

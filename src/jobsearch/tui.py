@@ -304,6 +304,37 @@ def tracker_outreach_ids(cfg: Config) -> set[str]:
         return tracker.job_ids_with_outreach()
 
 
+def location_fails(row: Any, cfg: Config) -> bool:
+    """True when the location constraint definitively eliminates this role.
+
+    Only a definite FAIL counts. An unclassifiable location stays visible: a
+    "?" is a question to ask, not an answer, and Mistral labels EMEA roles by
+    office city.
+    """
+    from .models import JobPosting, Verdict
+    from .scoring import check_location
+
+    location = str(_get(row, "location", "") or "")
+    if not location:
+        return False
+    posting = JobPosting(company="", title="", url="", location=location)
+    return check_location(posting, cfg).verdict is Verdict.FAIL
+
+
+def is_hidden(row: Any, cfg: Config) -> bool:
+    """True for a row kept off the default view.
+
+    Two reasons: you dismissed it, or the location constraint eliminates it and
+    you have not engaged with it anyway. Engaging overrides the filter - if you
+    applied to something outside the EU deliberately, that decision is yours
+    and the table should keep showing it.
+    """
+    if str(_get(row, "status", "")) == DISMISSED_STATUS.value:
+        return True
+    untouched = str(_get(row, "status", "")) == Status.NOT_STARTED.value
+    return untouched and location_fails(row, cfg)
+
+
 def location_cell(row: Any, cfg: Config) -> str:
     """Location plus a fitness glyph, using the same check the scorer uses.
 
@@ -910,7 +941,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("n", "new_role", "Add role"),
             Binding("d", "dismiss", "Dismiss"),
             Binding("x", "delete_role", "Delete"),
-            Binding("h", "toggle_dismissed", "Show dismissed"),
+            Binding("h", "toggle_hidden", "Show hidden"),
             Binding("f", "scan", "Scan boards"),
             Binding("comma", "settings", "Settings"),
             Binding("r", "refresh_rows", "Refresh"),
@@ -924,7 +955,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.cfg = cfg
             self.dry_run = dry_run
             self.filter_text = ""
-            self.show_dismissed = False
+            self.show_hidden = False
+            self.hidden_count = 0
             self.outreach_ids: set[str] = set()
             self.rows: list[Any] = []
             self.busy = False
@@ -965,8 +997,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             with Tracker.from_config(self.cfg) as tracker:
                 rows = tracker.list_jobs()
             self.outreach_ids = tracker_outreach_ids(self.cfg)
-            if not self.show_dismissed:
-                rows = [r for r in rows if str(_get(r, "status", "")) != DISMISSED_STATUS.value]
+            self.hidden_count = sum(1 for r in rows if is_hidden(r, self.cfg))
+            if not self.show_hidden:
+                rows = [r for r in rows if not is_hidden(r, self.cfg)]
             rows.sort(key=sort_key)
             needle = self.filter_text.strip().lower()
             if needle:
@@ -1009,8 +1042,10 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             bits = [counts]
             if self.filter_text:
                 bits.append(f"filter: {self.filter_text}")
-            if self.show_dismissed:
-                bits.append("including dismissed")
+            if self.show_hidden:
+                bits.append("including hidden")
+            elif self.hidden_count:
+                bits.append(f"{self.hidden_count} hidden")
             self.sub_title = "  ·  ".join(bits)
 
         def selected_row(self) -> Any | None:
@@ -1123,8 +1158,8 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 self.cfg.reload()
                 self.action_refresh_rows()
 
-        def action_toggle_dismissed(self) -> None:
-            self.show_dismissed = not self.show_dismissed
+        def action_toggle_hidden(self) -> None:
+            self.show_hidden = not self.show_hidden
             self.action_refresh_rows()
 
         def action_dismiss(self) -> None:
