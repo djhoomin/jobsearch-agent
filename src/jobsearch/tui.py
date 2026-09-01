@@ -2039,6 +2039,28 @@ def score_many_blocking(
     return f"batch of {total}: " + ", ".join(parts)
 
 
+def load_critiques(row: Any) -> list[Any]:
+    """Prior adversarial findings for a role, so a re-run can address them.
+
+    Re-tailoring without them just re-rolls the dice: the model never saw the
+    criticism, so it has no reason to produce anything different.
+    """
+    import json
+
+    from .models import Critique
+
+    raw = _get(row, "critique_json")
+    if not raw:
+        return []
+    return [
+        Critique(
+            issue=str(c.get("issue", "")), severity=str(c.get("severity", "minor")),
+            quote=str(c.get("quote", "")), why=str(c.get("why", "")), fix=str(c.get("fix", "")),
+        )
+        for c in json.loads(raw)
+    ]
+
+
 def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = False) -> str:
     """Execute one stage synchronously and return a one-line result summary.
 
@@ -2079,7 +2101,8 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
         if stage == "tailor":
             from .tailor import tailor_cv
 
-            result = tailor_cv(posting, cfg, client)
+            prior = load_critiques(tracker.get_job(job_id))
+            result = tailor_cv(posting, cfg, client, prior_critiques=prior)
             if not dry_run:
                 tracker.save_cv(
                     job_id,
@@ -2100,10 +2123,11 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
                 flag += f"  [red]{blocking} blocking critique(s)[/]"
             elif result.critiques:
                 flag += f"  [dim]{len(result.critiques)} critique(s)[/]"
+            addressed = f"  [dim]addressed {len(prior)} prior finding(s)[/]" if prior else ""
             name = Path(str(result.pdf_path or result.html_path)).name
             pages = f"  {result.pages}pp" if result.pages else ""
             fit = f"  [dim]({len(result.fit_notes)} compaction step(s))[/]" if result.fit_notes else ""
-            return f"tailored {name}{pages}{fit}  {flag}  [dim]press v to verify[/]"
+            return f"tailored {name}{pages}{fit}{addressed}  {flag}  [dim]press v to verify[/]"
 
         if stage == "letter":
             from .letter import write_letter

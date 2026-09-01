@@ -422,7 +422,17 @@ list is a valid answer, and it is told so, because a critic with a quota
 invents problems.
 
 Findings are stored on the job row and shown on the role page, sorted with
-blocking first.
+blocking first. Nothing is rewritten automatically: which half of a dense
+bullet to cut is judgement, and an auto-rewrite is a fresh generation that can
+introduce a new ungrounded claim - the exact failure the grounding pass exists
+to catch.
+
+**Re-running `t` closes the loop.** The stored findings are fed back into the
+next generation, with an instruction not to invent anything to answer them: if
+a critique can only be addressed with a fact that is not in the sources, cut
+the claim instead of strengthening it. `--fresh` ignores them. Without this,
+re-tailoring just re-rolls the dice, because the model never saw the
+criticism.
 
 ### 5. `verify` — the ATS verifier
 

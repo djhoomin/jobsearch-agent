@@ -599,3 +599,56 @@ class TestAdversarialReview:
         assert "do not check whether claims are true" in flat
         assert "trivially true" in flat
         assert "an empty list is a valid" in flat
+
+
+class TestCritiqueFeedbackLoop:
+    """Re-tailoring without the previous criticism just re-rolls the dice."""
+
+    def _posting(self):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(company="Acme", title="Head of AI", url="", job_id="j")
+
+    def test_prior_findings_reach_the_prompt(self):
+        from jobsearch.models import Critique
+        from jobsearch.tailor import _tailor_prompt
+
+        prompt = _tailor_prompt(self._posting(), [
+            Critique(issue="Trivially true", severity="major",
+                     quote="beat a frontier model", fix="state the condition")
+        ])
+        assert "previous_version_was_criticised_for" in prompt
+        assert "Trivially true" in prompt
+        assert "beat a frontier model" in prompt
+        assert "state the condition" in prompt
+
+    def test_no_findings_means_no_block(self):
+        from jobsearch.tailor import _tailor_prompt
+
+        assert "previous_version" not in _tailor_prompt(self._posting())
+
+    def test_the_prompt_forbids_inventing_a_fix(self):
+        """The obvious failure mode: answering a critique with a new claim."""
+        from jobsearch.models import Critique
+        from jobsearch.tailor import _tailor_prompt
+
+        prompt = _tailor_prompt(self._posting(), [Critique(issue="x", severity="minor")])
+        assert "Do NOT invent anything" in prompt
+        assert "cut the" in prompt and "claim instead" in prompt
+
+    def test_stored_findings_are_loaded_back(self, cfg):
+        import json
+
+        from jobsearch.tui import load_critiques
+
+        row = {"critique_json": json.dumps([
+            {"issue": "i", "severity": "blocking", "quote": "q", "why": "w", "fix": "f"}
+        ])}
+        loaded = load_critiques(row)
+        assert len(loaded) == 1 and loaded[0].severity == "blocking"
+
+    def test_a_role_with_no_prior_review_loads_nothing(self):
+        from jobsearch.tui import load_critiques
+
+        assert load_critiques({}) == []
+        assert load_critiques({"critique_json": None}) == []

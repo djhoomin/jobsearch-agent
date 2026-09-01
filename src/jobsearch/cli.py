@@ -240,11 +240,18 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
         posting = tracker.get_posting(job_id)
         print(f"Tailoring for {posting.company} - {posting.title}")
 
+        from .tui import load_critiques
+
+        prior = [] if args.fresh else load_critiques(tracker.get_job(job_id))
+        if prior:
+            print(f"  addressing {len(prior)} finding(s) from the previous version")
+
         on_delta = (lambda text: print(text, end="", flush=True)) if args.stream else None
         result = tailor_cv(
             posting,
             cfg,
             client,
+            prior_critiques=prior,
             render=not args.no_render,
             verify_claims=not args.no_verify_claims,
             on_delta=on_delta,
@@ -836,6 +843,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the grounding audit (not recommended)",
     )
     p.add_argument("--stream", action="store_true", help="Print the CV as it generates")
+    p.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Ignore the previous version's adversarial findings instead of addressing them",
+    )
     p.set_defaults(func=cmd_tailor)
 
     # verify

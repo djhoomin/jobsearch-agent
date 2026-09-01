@@ -593,6 +593,7 @@ def tailor_cv(
     render: bool = True,
     verify_claims: bool = True,
     adversarial: bool = True,
+    prior_critiques: Sequence[Critique] = (),
     on_delta: Callable[[str], None] | None = None,
 ) -> TailorResult:
     """Generate, harden, render and ground-check a tailored CV."""
@@ -607,7 +608,7 @@ def tailor_cv(
     html = claude.stream_text(
         instructions=tailor_instructions(cfg),
         stable_context=stable,
-        user_content=_tailor_prompt(posting),
+        user_content=_tailor_prompt(posting, prior_critiques),
         stage="tailor",
         dry_run_value=cfg.read_base_cv(),
         on_delta=on_delta,
@@ -700,7 +701,28 @@ def ground_claims(
     return claims
 
 
-def _tailor_prompt(posting: JobPosting) -> str:
+def _tailor_prompt(
+    posting: JobPosting, prior_critiques: Sequence[Critique] = ()
+) -> str:
+    critique_block: list[str] = []
+    if prior_critiques:
+        critique_block = [
+            "",
+            "<previous_version_was_criticised_for>",
+            "A sceptical reader raised these against the last version of this CV.",
+            "Address each one. Do NOT invent anything to do so: if a finding can",
+            "only be answered with a fact that is not in the sources, cut the",
+            "claim instead of strengthening it.",
+            "",
+        ]
+        for c in prior_critiques:
+            critique_block.append(f"- [{c.severity}] {c.issue}")
+            if c.quote:
+                critique_block.append(f'    text: "{c.quote}"')
+            if c.fix:
+                critique_block.append(f"    suggested: {c.fix}")
+        critique_block.append("</previous_version_was_criticised_for>")
+
     return "\n".join(
         [
             "<job_posting>",
@@ -712,6 +734,7 @@ def _tailor_prompt(posting: JobPosting) -> str:
             "",
             posting.description or "(no description text available)",
             "</job_posting>",
+            *critique_block,
             "",
             "Produce the complete tailored HTML CV now. Output HTML only.",
         ]
