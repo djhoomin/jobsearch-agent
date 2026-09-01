@@ -27,6 +27,8 @@ db_path = "output/jobsearch.db"
 #   model       = "anthropic/claude-opus-4.1"
 #   explicit_cache = "auto"   # auto | true | false: cache_control breakpoints
 #                             # are sent for providers that need them
+#   session_id = "my-search"  # sticky routing, so cache hits survive between
+#                             # calls; derived from the config path if unset
 #   extra_headers = { "HTTP-Referer" = "https://github.com/you/jobsearch-agent" }
 #
 # Caching works on that path too: most OpenRouter providers cache automatically

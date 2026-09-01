@@ -259,3 +259,49 @@ class TestPromptCaching:
         assert client.last_usage.cache_read_input_tokens == 10318
         assert client.last_usage.cache_creation_input_tokens == 21
         assert client.last_usage.cache_hit
+
+
+class TestStickySessions:
+    """Without a session id, OpenRouter pins a provider only *after* it sees a
+    cache hit, which cannot happen when the first call warms a cache the second
+    call never reaches.
+    """
+
+    def test_a_session_id_is_sent(self, cfg):
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        cfg.raw.setdefault("claude", {}).update({"base_url": "http://x", "model": "m"})
+        client = OpenAICompatibleClient.from_config(cfg, dry_run=True)
+        assert client._params("score", 100)["extra_body"]["session_id"]
+
+    def test_it_is_stable_across_clients(self, cfg):
+        """Two runs of the tool must land on the same provider."""
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        cfg.raw.setdefault("claude", {}).update({"base_url": "http://x", "model": "m"})
+        first = OpenAICompatibleClient.from_config(cfg, dry_run=True)
+        second = OpenAICompatibleClient.from_config(cfg, dry_run=True)
+        assert first.session_id == second.session_id
+
+    def test_it_is_the_same_for_every_stage(self, cfg):
+        """One provider for all traffic, not one per stage."""
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        cfg.raw.setdefault("claude", {}).update({"base_url": "http://x", "model": "m"})
+        client = OpenAICompatibleClient.from_config(cfg, dry_run=True)
+        ids = {client._params(s, 100)["extra_body"]["session_id"] for s in ("score", "tailor", "letter")}
+        assert len(ids) == 1
+
+    def test_an_explicit_session_id_wins(self, cfg):
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        cfg.raw.setdefault("claude", {}).update(
+            {"base_url": "http://x", "model": "m", "session_id": "mine"}
+        )
+        assert OpenAICompatibleClient.from_config(cfg, dry_run=True).session_id == "mine"
+
+    def test_it_is_capped_at_the_documented_limit(self):
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        client = OpenAICompatibleClient(model="m", base_url="http://x", session_id="x" * 400)
+        assert len(client._params("score", 100)["extra_body"]["session_id"]) == 256

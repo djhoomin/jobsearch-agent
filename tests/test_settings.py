@@ -178,3 +178,44 @@ class TestBaseUrlValidation:
             "provider": "openai_compatible",
             "base_url": "https://openrouter.ai/api/v1",
         })
+
+
+class TestSubTablePlacement:
+    """A TOML sub-table absorbs every key that follows it, so writing one into
+    the middle of its parent section silently reparents the rest.
+    """
+
+    def test_a_sub_table_must_not_swallow_its_parents_keys(self):
+        import tomllib
+
+        broken = (
+            '[claude]\n'
+            'provider = "openai_compatible"\n'
+            '[claude.provider_routing]\n'
+            'only = ["DeepInfra"]\n'
+            'model = "z-ai/glm-5.3"\n'      # written after the sub-table header
+        )
+        raw = tomllib.loads(broken)
+        assert "model" not in raw["claude"], "this is the failure mode being guarded"
+        assert raw["claude"]["provider_routing"]["model"] == "z-ai/glm-5.3"
+
+    def test_the_shipped_template_keeps_scalars_before_sub_tables(self):
+        """Guards the real config's shape: any [claude.x] must come last."""
+        import re
+
+        lines = TEMPLATE.splitlines()
+        in_claude = False
+        seen_subtable = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("["):
+                if stripped == "[claude]":
+                    in_claude, seen_subtable = True, False
+                    continue
+                if in_claude and stripped.startswith("[claude."):
+                    seen_subtable = True
+                    continue
+                in_claude = False
+                continue
+            if in_claude and seen_subtable and re.match(r"^\w+\s*=", stripped):
+                raise AssertionError(f"scalar after a [claude.*] sub-table: {stripped}")

@@ -41,6 +41,19 @@ __all__ = [
 EXPLICIT_CACHE_PREFIXES: tuple[str, ...] = ("anthropic/", "qwen/", "alibaba/")
 
 
+def _default_session_id(cfg: Any) -> str:
+    """A stable sticky-session key for this install.
+
+    Derived from the config path so it survives restarts and stays the same
+    across stages: the goal is one provider for all of this tool's traffic, not
+    one per conversation.
+    """
+    import hashlib
+
+    seed = str(getattr(cfg, "source", "") or getattr(cfg, "root", "jobsearch"))
+    return "jobsearch-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
 def supports_explicit_cache(model: str) -> bool:
     """True when this model's provider requires cache_control breakpoints."""
     return str(model or "").strip().lower().startswith(EXPLICIT_CACHE_PREFIXES)
@@ -131,6 +144,17 @@ class OpenAICompatibleClient:
     cache_ttl: str = "1h"
     #: "auto" enables cache_control for providers that need it, off otherwise.
     explicit_cache: str = "auto"
+    #: OpenRouter provider routing, e.g. {"only": ["DeepInfra"]}. A popular
+    #: model can be served by twenty upstreams; a prompt cache is warmed on one
+    #: of them, so without pinning consecutive calls land on different machines
+    #: and every request is a cache miss.
+    provider_routing: dict[str, Any] = field(default_factory=dict)
+    #: OpenRouter sticky-session key. Without it, sticky routing only engages
+    #: *after* a cache hit is observed, which never happens when the first call
+    #: warms a cache the second call does not reach. With it, the provider is
+    #: pinned from the first successful request. Preferred over pinning a
+    #: single provider, which forfeits failover.
+    session_id: str = ""
     extra_headers: dict[str, str] = field(default_factory=dict)
     stage_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
     dry_run: bool = False
@@ -178,6 +202,8 @@ class OpenAICompatibleClient:
             temperature=section.get("temperature"),
             cache_ttl=section.get("cache_ttl", "1h"),
             explicit_cache=str(section.get("explicit_cache", "auto")),
+            provider_routing=dict(section.get("provider_routing", {}) or {}),
+            session_id=str(section.get("session_id") or _default_session_id(cfg)),
             extra_headers=dict(section.get("extra_headers", {}) or {}),
             stage_overrides={
                 str(name): dict(values)
@@ -254,6 +280,14 @@ class OpenAICompatibleClient:
         params: dict[str, Any] = {"model": self.model_for(stage), "max_tokens": max_tokens}
         if self.temperature is not None:
             params["temperature"] = float(self.temperature)
+        extra: dict[str, Any] = {}
+        if self.provider_routing:
+            extra["provider"] = self.provider_routing
+        if self.session_id:
+            extra["session_id"] = self.session_id[:256]
+        # Ask for detailed usage so cache hits are reported at all.
+        extra["usage"] = {"include": True}
+        params["extra_body"] = extra
         return params
 
     def structured(
