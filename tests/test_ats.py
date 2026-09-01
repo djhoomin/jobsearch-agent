@@ -267,3 +267,54 @@ class TestEndToEnd:
 def test_missing_pdf_raises():
     with pytest.raises(FileNotFoundError):
         verify_pdf("/nonexistent/file.pdf")
+
+
+class TestEducationChecksQualificationsOnly:
+    """A Languages or Certifications line under Education has no date by
+    design. Flagging it trains you to ignore a check that matters.
+    """
+
+    HEADINGS = ["Professional Summary", "Professional Experience", "Skills", "Education",
+                "Patents, Publications and Presentations"]
+
+    def _text(self, education_body: str) -> str:
+        return (
+            "Professional Summary\nsomething\n"
+            "Education\n" + education_body + "\n"
+            "Patents, Publications and Presentations\nsomething\n"
+        )
+
+    def test_a_languages_line_does_not_fail_the_check(self):
+        from jobsearch.ats import check_education_lines
+
+        text = self._text(
+            "Stellenbosch University · MSc: Operations Research · Mar 2016 - Sep 2019\n"
+            "Languages · English (fluent) · Afrikaans (native) · Dutch (C1 reading)"
+        )
+        assert check_education_lines(text, self.HEADINGS).ok
+
+    def test_a_degree_without_a_date_still_fails(self):
+        """The real defect must still be caught."""
+        from jobsearch.ats import check_education_lines
+
+        text = self._text("Stellenbosch University · MSc: Operations Research")
+        result = check_education_lines(text, self.HEADINGS)
+        assert not result.ok
+        assert "no date on" in " ".join(result.details)
+
+    def test_a_certifications_line_is_also_ignored(self):
+        from jobsearch.ats import check_education_lines
+
+        text = self._text(
+            "Stellenbosch University · BSc: Mathematical Sciences · Feb 2011 - Nov 2013\n"
+            "Certifications · none"
+        )
+        assert check_education_lines(text, self.HEADINGS).ok
+
+    def test_qualification_detection(self):
+        from jobsearch.ats import looks_like_a_qualification
+
+        assert looks_like_a_qualification("Stellenbosch University · BCom (Honours)")
+        assert looks_like_a_qualification("MSc: Operations Research")
+        assert not looks_like_a_qualification("Languages · English · Afrikaans")
+        assert not looks_like_a_qualification("Certifications · none")

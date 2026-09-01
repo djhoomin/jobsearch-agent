@@ -295,8 +295,29 @@ def section_text(text: str, heading: str, all_headings: Sequence[str]) -> str:
     return "\n".join(body).strip()
 
 
+#: Tokens that mark a line under Education as an actual qualification. A
+#: Languages or Certifications line legitimately carries no date range, and
+#: failing it would train you to ignore this check.
+DEGREE_TOKENS = (
+    "university", "college", "institute", "school",
+    "bsc", "msc", "ba ", "bcom", "mba", "phd", "bachelor", "master", "honours",
+    "doctorate", "diploma", "degree",
+)
+
+
+def looks_like_a_qualification(line: str) -> bool:
+    """True when a line under Education names an institution or a degree."""
+    lowered = line.lower()
+    return any(token in lowered for token in DEGREE_TOKENS)
+
+
 def check_education_lines(text: str, all_headings: Sequence[str]) -> Check:
-    """Each education entry must extract on ONE line, with its own date range."""
+    """Each education entry must extract on ONE line, with its own date range.
+
+    Only qualification lines are checked. A Languages line under the same
+    heading has no date by design, and flagging it would be a false positive
+    on a document that is correct.
+    """
     body = section_text(text, "Education", all_headings)
     if not body:
         return Check(
@@ -304,7 +325,11 @@ def check_education_lines(text: str, all_headings: Sequence[str]) -> Check:
             "fail",
             "no Education section body found after the heading",
         )
-    entries = [line.strip() for line in body.splitlines() if line.strip()]
+    entries = [
+        line.strip()
+        for line in body.splitlines()
+        if line.strip() and looks_like_a_qualification(line)
+    ]
     if not entries:
         return Check("education_entries", "fail", "Education section is empty")
     problems = [e for e in entries if not DATE_RANGE.search(e)]
