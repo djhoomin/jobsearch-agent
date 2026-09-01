@@ -27,7 +27,23 @@ from typing import Any, Callable, Sequence
 
 from .claude import ClaudeError, Usage
 
-__all__ = ["OpenAICompatibleClient", "extract_json", "normalise_base_url"]
+__all__ = [
+    "OpenAICompatibleClient",
+    "extract_json",
+    "normalise_base_url",
+    "supports_explicit_cache",
+]
+
+#: Model prefixes whose providers need explicit ``cache_control`` breakpoints.
+#: Everything else on OpenRouter that caches at all does so automatically
+#: (OpenAI, DeepSeek, Grok, Groq, Moonshot, Z.AI, Gemini 2.5+), and only needs
+#: a byte-identical prefix, which `messages_for` already guarantees.
+EXPLICIT_CACHE_PREFIXES: tuple[str, ...] = ("anthropic/", "qwen/", "alibaba/")
+
+
+def supports_explicit_cache(model: str) -> bool:
+    """True when this model's provider requires cache_control breakpoints."""
+    return str(model or "").strip().lower().startswith(EXPLICIT_CACHE_PREFIXES)
 
 #: Paths the SDK appends itself. Pasting the full endpoint URL from a
 #: provider's docs is the obvious mistake, and it produces a 404 that says
@@ -112,6 +128,9 @@ class OpenAICompatibleClient:
     max_tokens: int = 16000
     streaming_max_tokens: int = 64000
     temperature: float | None = None
+    cache_ttl: str = "1h"
+    #: "auto" enables cache_control for providers that need it, off otherwise.
+    explicit_cache: str = "auto"
     extra_headers: dict[str, str] = field(default_factory=dict)
     stage_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
     dry_run: bool = False
@@ -157,6 +176,8 @@ class OpenAICompatibleClient:
             max_tokens=int(section.get("max_tokens", 16000)),
             streaming_max_tokens=int(section.get("streaming_max_tokens", 64000)),
             temperature=section.get("temperature"),
+            cache_ttl=section.get("cache_ttl", "1h"),
+            explicit_cache=str(section.get("explicit_cache", "auto")),
             extra_headers=dict(section.get("extra_headers", {}) or {}),
             stage_overrides={
                 str(name): dict(values)
@@ -178,22 +199,55 @@ class OpenAICompatibleClient:
     def last_usage(self) -> Usage:
         return self._last_usage
 
-    def messages_for(
-        self, instructions: str, stable_context: Sequence[tuple[str, str]], user_content: str
-    ) -> list[dict[str, str]]:
-        """Flatten the system blocks into one system message.
+    def uses_explicit_cache(self, stage: str) -> bool:
+        """Whether to send cache_control breakpoints for this stage's model."""
+        setting = str(self.explicit_cache).strip().lower()
+        if setting in {"true", "yes", "on", "always"}:
+            return True
+        if setting in {"false", "no", "off", "never"}:
+            return False
+        return supports_explicit_cache(self.model_for(stage))
 
-        The Anthropic path sends the stable prefix as separate cacheable
-        blocks; this dialect has no equivalent, so they are concatenated in the
-        same fixed order - which at least keeps the prefix byte-identical for
-        endpoints that do their own prefix caching.
+    def messages_for(
+        self,
+        instructions: str,
+        stable_context: Sequence[tuple[str, str]],
+        user_content: str,
+        explicit_cache: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Build the request messages, prefix first.
+
+        Without ``explicit_cache`` the stable prefix is concatenated into one
+        system message in fixed order. That is enough for the providers that
+        cache automatically: they only need the prefix to be byte-identical
+        between calls.
+
+        With it, the prefix becomes a cache_control content block, which is
+        what Anthropic and Qwen require through OpenRouter. Marking the prefix
+        rather than the whole message is the point: the volatile per-role text
+        must fall outside the breakpoint or nothing ever hits.
         """
-        parts = [instructions]
-        for label, body in stable_context:
-            parts.append(f"<{label}>\n{body}\n</{label}>")
+        prefix = "\n\n".join(
+            f"<{label}>\n{body}\n</{label}>" for label, body in stable_context
+        )
+        if not explicit_cache:
+            parts = [instructions] + ([prefix] if prefix else [])
+            return [
+                {"role": "system", "content": "\n\n".join(parts)},
+                {"role": "user", "content": user_content},
+            ]
+
+        blocks: list[dict[str, Any]] = []
+        if prefix:
+            blocks.append({
+                "type": "text",
+                "text": prefix,
+                "cache_control": {"type": "ephemeral", "ttl": self.cache_ttl},
+            })
+        blocks.append({"type": "text", "text": user_content})
         return [
-            {"role": "system", "content": "\n\n".join(parts)},
-            {"role": "user", "content": user_content},
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": blocks},
         ]
 
     def _params(self, stage: str, max_tokens: int) -> dict[str, Any]:
@@ -221,6 +275,7 @@ class OpenAICompatibleClient:
             instructions + "\n\n" + JSON_INSTRUCTION + json.dumps(schema, indent=2),
             stable_context,
             user_content,
+            explicit_cache=self.uses_explicit_cache(stage),
         )
         response = self.client.chat.completions.create(
             **self._params(stage, max_tokens or self.max_tokens),
@@ -253,7 +308,10 @@ class OpenAICompatibleClient:
 
         stream = self.client.chat.completions.create(
             **self._params(stage, max_tokens or self.streaming_max_tokens),
-            messages=self.messages_for(instructions, stable_context, user_content),
+            messages=self.messages_for(
+                instructions, stable_context, user_content,
+                explicit_cache=self.uses_explicit_cache(stage),
+            ),
             stream=True,
             stream_options={"include_usage": True},
         )
@@ -277,14 +335,16 @@ class OpenAICompatibleClient:
         usage = getattr(response, "usage", None)
         if usage is None:
             return
-        cached = 0
+        cached = written = 0
         details = getattr(usage, "prompt_tokens_details", None)
         if details is not None:
             cached = int(getattr(details, "cached_tokens", 0) or 0)
+            written = int(getattr(details, "cache_write_tokens", 0) or 0)
         self._last_usage = Usage(
             input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
             cache_read_input_tokens=cached,
+            cache_creation_input_tokens=written,
         )
 
     def _note_dry_run(self, stage: str, prompt: str) -> None:

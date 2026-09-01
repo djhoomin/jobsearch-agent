@@ -188,3 +188,74 @@ class TestNormaliseBaseUrl:
         })
         client = OpenAICompatibleClient.from_config(cfg, dry_run=True)
         assert client.base_url == "https://openrouter.ai/api/v1"
+
+
+class TestPromptCaching:
+    """OpenRouter caches two ways: automatically for most providers, and via
+    explicit cache_control breakpoints for Anthropic and Qwen.
+    """
+
+    def test_providers_needing_breakpoints_are_detected(self):
+        from jobsearch.openai_compat import supports_explicit_cache
+
+        assert supports_explicit_cache("anthropic/claude-opus-4.1")
+        assert supports_explicit_cache("qwen/qwen3-max")
+        assert not supports_explicit_cache("z-ai/glm-5.3")
+        assert not supports_explicit_cache("openai/gpt-5")
+        assert not supports_explicit_cache("")
+
+    def test_automatic_providers_get_one_stable_system_message(self):
+        """They need only a byte-identical prefix, not breakpoints."""
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        client = OpenAICompatibleClient(model="z-ai/glm-5.3", base_url="http://x")
+        messages = client.messages_for("INSTR", [("dossier", "D")], "ASK")
+        assert isinstance(messages[0]["content"], str)
+        assert "cache_control" not in str(messages)
+
+    def test_the_breakpoint_covers_the_prefix_and_not_the_question(self):
+        """The volatile per-role text must fall outside the breakpoint or
+        nothing ever hits."""
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        client = OpenAICompatibleClient(model="anthropic/claude-opus-4.1", base_url="http://x")
+        blocks = client.messages_for(
+            "INSTR", [("dossier", "D"), ("base_cv", "C")], "ASK", explicit_cache=True
+        )[1]["content"]
+        assert "cache_control" in blocks[0]
+        assert "dossier" in blocks[0]["text"] and "base_cv" in blocks[0]["text"]
+        assert blocks[1] == {"type": "text", "text": "ASK"}
+        assert "cache_control" not in blocks[1]
+
+    def test_the_prefix_is_byte_identical_between_calls(self):
+        """Any drift in the prefix means a permanent cache miss."""
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        client = OpenAICompatibleClient(model="anthropic/claude-opus-4.1", base_url="http://x")
+        first = client.messages_for("I", [("dossier", "D")], "question one", explicit_cache=True)
+        second = client.messages_for("I", [("dossier", "D")], "question two", explicit_cache=True)
+        assert first[1]["content"][0] == second[1]["content"][0]
+
+    def test_the_setting_can_be_forced_either_way(self):
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        on = OpenAICompatibleClient(model="z-ai/glm-5.3", base_url="http://x", explicit_cache="true")
+        off = OpenAICompatibleClient(
+            model="anthropic/claude-opus-4.1", base_url="http://x", explicit_cache="false"
+        )
+        assert on.uses_explicit_cache("score")
+        assert not off.uses_explicit_cache("score")
+
+    def test_cache_writes_are_recorded_as_well_as_reads(self):
+        from types import SimpleNamespace
+
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        client = OpenAICompatibleClient(model="m", base_url="http://x")
+        client._record_usage(SimpleNamespace(usage=SimpleNamespace(
+            prompt_tokens=10339, completion_tokens=50,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=10318, cache_write_tokens=21),
+        )))
+        assert client.last_usage.cache_read_input_tokens == 10318
+        assert client.last_usage.cache_creation_input_tokens == 21
+        assert client.last_usage.cache_hit
