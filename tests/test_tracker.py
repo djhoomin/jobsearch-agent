@@ -323,3 +323,31 @@ def _score(job_id: str, weighted: float) -> ScoreReport:
         weighted=weighted,
         recommendation="apply",
     )
+
+
+class TestEmptyResultsAreStored:
+    """An empty findings list means the check ran and found nothing. Storing
+    it as NULL makes a clean result indistinguishable from a missing one.
+    """
+
+    def test_an_empty_critique_list_is_persisted(self, cfg):
+        from jobsearch.models import JobPosting
+        from jobsearch.tracker import Tracker
+
+        with Tracker.from_config(cfg) as tracker:
+            job_id = tracker.upsert_job(
+                JobPosting(company="C", title="T", url="u", job_id="j1")
+            )
+            tracker.save_cv(job_id, "a.html", "a.pdf", None, None, [])
+            assert tracker.get_job(job_id)["critique_json"] == "[]"
+
+    def test_omitting_it_leaves_null(self, cfg):
+        from jobsearch.models import JobPosting
+        from jobsearch.tracker import Tracker
+
+        with Tracker.from_config(cfg) as tracker:
+            job_id = tracker.upsert_job(
+                JobPosting(company="C", title="T", url="u", job_id="j2")
+            )
+            tracker.save_cv(job_id, "a.html", "a.pdf")
+            assert tracker.get_job(job_id)["critique_json"] is None

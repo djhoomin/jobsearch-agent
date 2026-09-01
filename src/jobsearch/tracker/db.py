@@ -407,9 +407,12 @@ class Tracker:
                 (
                     html_path,
                     pdf_path,
-                    json.dumps(ats) if ats else None,
-                    json.dumps(claims) if claims else None,
-                    json.dumps(critiques) if critiques else None,
+                    # `is not None`, not truthiness: an empty list is a real
+                    # result meaning "the check ran and found nothing", and
+                    # storing it as NULL makes that look like "never ran".
+                    json.dumps(ats) if ats is not None else None,
+                    json.dumps(claims) if claims is not None else None,
+                    json.dumps(critiques) if critiques is not None else None,
                     _now(),
                     job_id,
                 ),
@@ -424,7 +427,7 @@ class Tracker:
             conn.execute(
                 "UPDATE job SET letter_path=?, letter_claims_json=?, updated_at=?"
                 " WHERE job_id=?",
-                (path, json.dumps(claims) if claims else None, _now(), job_id),
+                (path, json.dumps(claims) if claims is not None else None, _now(), job_id),
             )
 
     def save_contacts(self, job_id: str, contacts: Sequence[Contact]) -> None:

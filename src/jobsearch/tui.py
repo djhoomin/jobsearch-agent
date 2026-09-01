@@ -807,10 +807,18 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
                 for claim in bad:
                     out.append(f"  [yellow]·[/] {e(claim.get('text', ''))}")
 
-    critique_json = _get(row, "critique_json")
-    if critique_json:
-        critiques = json.loads(critique_json)
+    # `_get` returns the default for NULL, so ask the row directly: "found
+    # nothing" and "never ran" are different answers and must not look alike.
+    try:
+        critique_raw = row["critique_json"]
+    except (IndexError, KeyError, TypeError):
+        critique_raw = None
+    if _get(row, "cv_pdf_path") or _get(row, "cv_html_path"):
         out.append(rule("ADVERSARIAL REVIEW"))
+    if critique_raw is None and (_get(row, "cv_pdf_path") or _get(row, "cv_html_path")):
+        out.append("  [dim]not reviewed - this CV predates the check; press [b]t[/b] to re-run[/]")
+    if critique_raw is not None:
+        critiques = json.loads(critique_raw)
         if not critiques:
             out.append("  [green]a sceptical reader found nothing to object to[/]")
         for c in critiques:

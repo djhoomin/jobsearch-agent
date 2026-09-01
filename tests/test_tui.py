@@ -1919,3 +1919,53 @@ class TestCopyLog:
                 assert len(app.log_history) <= 500
 
         asyncio.run(scenario())
+
+
+class TestReviewedVersusNotReviewed:
+    """"Found nothing" and "never ran" are different answers. Rendering them
+    identically makes a clean review indistinguishable from a missing one.
+    """
+
+    def _with_cv(self, cfg):
+        job_id = seed(cfg)
+        path = cfg.ensure_output_dir() / "cv" / "x.pdf"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4\n")
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_cv(job_id, "x.html", str(path))
+        return job_id
+
+    def test_a_cv_never_reviewed_says_so(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        markup = role_detail_markup(cfg, self._with_cv(cfg))
+        assert "not reviewed" in markup
+
+    def test_a_clean_review_is_reported_as_clean(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        job_id = self._with_cv(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_cv(job_id, "x.html", "x.pdf", None, None, [])
+        markup = role_detail_markup(cfg, job_id)
+        assert "nothing to object to" in markup
+        assert "not reviewed" not in markup
+
+    def test_findings_are_listed_with_severity(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        job_id = self._with_cv(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_cv(job_id, "x.html", "x.pdf", None, None, [
+                {"issue": "Trivially true claim", "severity": "major",
+                 "quote": "beat a frontier model", "why": "", "fix": "state the condition"}
+            ])
+        markup = role_detail_markup(cfg, job_id)
+        assert "Trivially true claim" in markup
+        assert "major" in markup
+        assert "state the condition" in markup
+
+    def test_no_cv_means_no_section_at_all(self, cfg):
+        from jobsearch.tui import role_detail_markup
+
+        assert "ADVERSARIAL REVIEW" not in role_detail_markup(cfg, seed(cfg))
