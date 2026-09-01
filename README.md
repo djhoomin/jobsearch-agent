@@ -273,7 +273,7 @@ jobsearch verify output/cv/CV_Northwind.pdf
 jobsearch outreach northwind-director     # contacts + drafts, nothing sent
 jobsearch track northwind-director --status Applied --reason "applied via careers page"
 jobsearch export                         # xlsx in your tracker's column shape
-jobsearch run https://jobs.ashbyhq.com/northwind/a1b2c3d4-...  # all of it, agentically
+jobsearch letter northwind-director       # a short, grounded cover letter
 ```
 
 Job ids accept a unique prefix (`northwind-director`) or the posting URL.
