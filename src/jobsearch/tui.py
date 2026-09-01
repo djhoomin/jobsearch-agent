@@ -12,7 +12,7 @@ are turned into a plain instruction rather than a traceback.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Sequence
 
 from .config import Config
 from .models import Status
@@ -944,9 +944,11 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("h", "toggle_hidden", "Show hidden"),
             Binding("f", "scan", "Scan boards"),
             Binding("comma", "settings", "Settings"),
+            Binding("S", "score_all", "Score all"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
+            Binding("ctrl+c", "stop_batch", "Stop batch", show=False),
             Binding("q", "quit", "Quit"),
         ]
 
@@ -958,6 +960,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.show_hidden = False
             self.hidden_count = 0
             self.outreach_ids: set[str] = set()
+            self.stop_batch = False
             self.rows: list[Any] = []
             self.busy = False
             # The text last rendered into the detail pane. Kept on the app so
@@ -1149,6 +1152,44 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             finally:
                 self.call_from_thread(self.finish_stage)
 
+        def action_score_all(self) -> None:
+            if self.busy:
+                self.log_line("[yellow]a stage is already running[/]")
+                return
+            job_ids = unscored_job_ids(self.cfg, self.rows)
+            if not job_ids:
+                self.log_line("[dim]nothing visible is unscored[/]")
+                return
+            self.push_screen(ScoreAllScreen(len(job_ids)), lambda go: self.start_batch(job_ids, go))
+
+        def start_batch(self, job_ids: list[str], go: bool | None) -> None:
+            if not go:
+                return
+            self.stop_batch = False
+            self.busy = True
+            self.log_line(f"[b]scoring {len(job_ids)} role(s)[/]  [dim]press escape to stop[/]")
+            self.run_batch(job_ids)
+
+        @work(thread=True, exclusive=True)
+        def run_batch(self, job_ids: list[str]) -> None:
+            def progress(index: int, total: int, note: str) -> None:
+                self.app.call_from_thread(self.log_line, f"  [dim]{index}/{total}[/] {note}")
+
+            try:
+                summary = score_many_blocking(
+                    self.cfg, job_ids, dry_run=self.dry_run,
+                    on_progress=progress, should_stop=lambda: self.stop_batch,
+                )
+            except Exception as exc:  # noqa: BLE001 - surfaced into the log pane
+                summary = f"[red]{type(exc).__name__}:[/] {exc}"
+            self.app.call_from_thread(self.log_line, summary)
+            self.app.call_from_thread(self.finish_stage)
+
+        def action_stop_batch(self) -> None:
+            if self.busy:
+                self.stop_batch = True
+                self.log_line("[yellow]stopping after the current role…[/]")
+
         def action_settings(self) -> None:
             self.push_screen(SettingsScreen(self.cfg), self.after_settings)
 
@@ -1285,6 +1326,37 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         def finish_stage(self) -> None:
             self.busy = False
             self.action_refresh_rows()
+
+    class ScoreAllScreen(ModalScreen):  # type: ignore[misc]
+        """Confirm a batch before spending on it."""
+
+        BINDINGS = [
+            Binding("escape,n", "cancel", "Cancel"),
+            Binding("y,enter", "confirm", "Score"),
+        ]
+
+        def __init__(self, count: int) -> None:
+            super().__init__()
+            self.count = count
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="picker"):
+                yield Static(
+                    f"Score [b]{self.count}[/] unscored role(s)?\n\n"
+                    "[dim]Hard constraints run locally first, so anything failing visa, "
+                    "location, compensation or travel never reaches the model and costs "
+                    "nothing. The rest is one API call each against the cached dossier.\n\n"
+                    "Roles already scored are skipped. Stopping partway keeps everything "
+                    "finished so far.[/]\n\n"
+                    "[b]y[/] score    [b]n[/] cancel"
+                )
+            yield Footer()
+
+        def action_confirm(self) -> None:
+            self.dismiss(True)
+
+        def action_cancel(self) -> None:
+            self.dismiss(False)
 
     class SettingsScreen(ModalScreen):  # type: ignore[misc]
         """Edit the settings that decide what the search looks for.
@@ -1870,6 +1942,68 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                 webbrowser.open(url)
 
     return JobSearchTUI()
+
+
+def unscored_job_ids(cfg: Config, rows: Sequence[Any]) -> list[str]:
+    """Visible roles that have never been scored, in the order they are shown."""
+    return [
+        str(_get(row, "job_id", ""))
+        for row in rows
+        if _get(row, "score_weighted") is None and not _get(row, "score_json")
+    ]
+
+
+def score_many_blocking(
+    cfg: Config,
+    job_ids: Sequence[str],
+    *,
+    dry_run: bool = False,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> str:
+    """Score a batch of roles, one at a time, reporting progress.
+
+    Sequential on purpose. Each call warms the same cached prefix, the tracker
+    is a single SQLite connection, and a partial run leaves every role it
+    finished already saved - so stopping early costs nothing already paid for.
+    """
+    from .claude import make_client
+    from .scoring import score_posting
+    from .tracker import Tracker
+
+    client = make_client(cfg, dry_run=dry_run)
+    scored = eliminated = failed = 0
+    total = len(job_ids)
+
+    with Tracker.from_config(cfg) as tracker:
+        for index, job_id in enumerate(job_ids, start=1):
+            if should_stop is not None and should_stop():
+                return (
+                    f"stopped after {index - 1} of {total}: "
+                    f"[b]{scored} scored[/], {eliminated} eliminated"
+                )
+            company = str(_get(tracker.get_job(job_id), "company", job_id))
+            try:
+                posting = tracker.get_posting(job_id)
+                report = score_posting(posting, cfg, client)
+                if not dry_run:
+                    tracker.save_score(report)
+                if report.eliminated:
+                    eliminated += 1
+                    note = "eliminated"
+                else:
+                    scored += 1
+                    note = f"{report.weighted:.2f}" if report.weighted is not None else "scored"
+            except Exception as exc:  # noqa: BLE001 - one bad role must not stop the batch
+                failed += 1
+                note = f"failed: {type(exc).__name__}"
+            if on_progress is not None:
+                on_progress(index, total, f"{company}: {note}")
+
+    parts = [f"[b]{scored} scored[/]", f"{eliminated} eliminated by a hard constraint"]
+    if failed:
+        parts.append(f"[red]{failed} failed[/]")
+    return f"batch of {total}: " + ", ".join(parts)
 
 
 def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = False) -> str:

@@ -111,8 +111,8 @@ because a nominally cheaper model can cost more per role.
 
 No key is ever read from, written to, or prompted for by this code; the
 OpenAI-compatible path names an environment variable rather than storing a key
-in the config. Everything except the five model-backed stages (`score`,
-`tailor`, `letter`, `outreach`, `run`) works with no credentials at all,
+in the config. Everything except the four model-backed stages (`score`,
+`tailor`, `letter`, `outreach`) works with no credentials at all,
 including the entire ATS verifier.
 
 ---
@@ -148,6 +148,7 @@ behaviour cannot drift between the two.
 |---|---|
 | `enter` | Open the role page |
 | `s` `t` `b` `o` `v` | Score · tailor · cover letter · draft outreach · verify the CV |
+| `S` | Score every visible unscored role, with a confirmation first |
 | `f` | Scan the boards — pick all tiers or one |
 | `a` | Set status; only legal transitions are offered |
 | `n` | Add a role you found yourself |
@@ -471,20 +472,6 @@ jobsearch export
 extra `Jobs (jobsearch-agent)` sheet — into `output/`. It reads your file only
 to learn its header row, so a column you added is followed rather than
 overwritten, and **it refuses outright to write over your own tracker**.
-
-### 8. `run` — agentic end to end
-
-Hands the stages to Claude as tools via the SDK's Tool Runner and lets it work
-one role from URL to tracked application, deciding the order and the stopping
-point. It is instructed to stop when a hard constraint fails, to report every
-ungrounded claim verbatim, and to say plainly when a role is not worth pursuing.
-
-```bash
-jobsearch run https://jobs.ashbyhq.com/northwind/a1b2c3d4-...
-jobsearch run northwind-director --instruction "Aim outreach at the founder, not the posting"
-```
-
----
 
 ### `attach-cv`
 

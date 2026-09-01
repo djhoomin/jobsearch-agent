@@ -122,9 +122,13 @@ class TestCLI:
         parser = build_parser()
         commands = parser._subparsers._group_actions[0].choices  # noqa: SLF001
         assert set(commands) >= {
-            "discover", "score", "tailor", "verify", "outreach",
-            "track", "status", "export", "sync", "run", "doctor",
+            "discover", "score", "tailor", "letter", "verify", "outreach",
+            "track", "status", "export", "sync", "attach-cv", "doctor",
         }
+        assert "run" not in commands, (
+            "the agentic run command was removed: it duplicated the TUI stage "
+            "keys and was the only path never exercised against a live API"
+        )
         for name, sub in commands.items():
             assert sub.format_help(), f"{name} has no help"
 

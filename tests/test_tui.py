@@ -1789,3 +1789,84 @@ class TestLocationFilter:
                 assert "including hidden" in app.sub_title
 
         asyncio.run(scenario())
+
+
+class TestBulkScoring:
+    """53 unscored roles is past what anyone triages by eye. Scoring is the
+    cheap stage, and hard constraints run locally before the model is touched.
+    """
+
+    def test_it_only_picks_unscored_roles(self, cfg):
+        from jobsearch.models import ConstraintReport, ScoreReport
+        from jobsearch.tui import unscored_job_ids
+
+        a = seed(cfg, company="Unscored Co")
+        b = seed(cfg, company="Scored Co", title="Other")
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_score(ScoreReport(job_id=b, constraints=ConstraintReport(), weighted=4.0))
+            rows = tracker.list_jobs()
+        assert unscored_job_ids(cfg, rows) == [a]
+
+    def test_a_partial_run_keeps_what_it_finished(self, cfg):
+        """Stopping must not discard roles already paid for."""
+        from jobsearch.tui import score_many_blocking
+
+        ids = [seed(cfg, company=f"Co {i}", title=f"Role {i}") for i in range(3)]
+        seen: list[int] = []
+        message = score_many_blocking(
+            cfg, ids, dry_run=True,
+            on_progress=lambda i, n, note: seen.append(i),
+            should_stop=lambda: len(seen) >= 2,
+        )
+        assert "stopped after" in message
+        assert len(seen) == 2
+
+    def test_one_bad_role_does_not_stop_the_batch(self, cfg):
+        from jobsearch.tui import score_many_blocking
+
+        ids = [seed(cfg, company="Good Co"), "no-such-job", seed(cfg, company="Also Good", title="X")]
+        message = score_many_blocking(cfg, ids, dry_run=True)
+        assert "failed" in message
+        assert "2 scored" in message
+
+    def test_it_reports_eliminations_separately(self, cfg):
+        """A role failing a hard constraint never reaches the model."""
+        from jobsearch.tui import score_many_blocking
+
+        blocked = seed(cfg, company="US Co", title="Director", location="Remote - United States")
+        message = score_many_blocking(cfg, [blocked], dry_run=True)
+        assert "1 eliminated" in message
+
+    def test_capital_s_asks_before_spending(self, cfg):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg, dry_run=True)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("S")
+                await pilot.pause()
+                assert type(app.screen).__name__ == "ScoreAllScreen"
+                assert app.busy is False, "nothing runs until confirmed"
+                await pilot.press("n")
+                await pilot.pause()
+                assert app.busy is False
+
+        asyncio.run(scenario())
+
+    def test_nothing_unscored_is_a_no_op(self, cfg):
+        from jobsearch.models import ConstraintReport, ScoreReport
+
+        job_id = seed(cfg)
+        with Tracker.from_config(cfg) as tracker:
+            tracker.save_score(ScoreReport(job_id=job_id, constraints=ConstraintReport(), weighted=4.0))
+
+        async def scenario():
+            app = build_app(cfg, dry_run=True)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("S")
+                await pilot.pause()
+                assert len(app.screen_stack) == 1, "no dialog when there is nothing to do"
+
+        asyncio.run(scenario())

@@ -597,29 +597,6 @@ def cmd_sync(cfg: Config, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
-    from .agent import run_agent
-
-    tracker = _tracker(cfg)
-    client = _client(cfg, args)
-    try:
-        print(f"Running the full pipeline for {args.target}\n")
-        brief = run_agent(
-            args.target, cfg, client, tracker, instruction=args.instruction or ""
-        )
-        print()
-        print("=" * 70)
-        print(brief)
-    finally:
-        tracker.close()
-    return 0
-
-
-# ---------------------------------------------------------------------------
-# config check
-# ---------------------------------------------------------------------------
-
-
 def cmd_attach_cv(cfg: Config, args: argparse.Namespace) -> int:
     """Record a CV written outside the tool against a role."""
     from .tui import attach_cv_blocking
@@ -946,18 +923,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_sync)
 
     # run
-    p = sub.add_parser(
-        "run",
-        help="Agentic end-to-end: fetch, score, tailor, verify, outreach, track",
-        description=(
-            "Hands the pipeline stages to Claude as tools and lets it work one "
-            "role end to end, stopping on a hard-constraint failure."
-        ),
-    )
-    p.add_argument("target", help="Posting URL or tracked job id")
-    p.add_argument("--instruction", help="Extra steer for this run")
-    p.set_defaults(func=cmd_run)
-
+    
     # doctor
     p = sub.add_parser(
         "attach-cv",
