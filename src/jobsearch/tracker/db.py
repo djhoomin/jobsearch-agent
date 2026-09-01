@@ -170,6 +170,7 @@ class Tracker:
         ("contact", "group_id INTEGER"),
         ("job", "letter_path TEXT"),
         ("job", "letter_claims_json TEXT"),
+        ("job", "critique_json TEXT"),
     )
 
     def _add_missing_columns(self) -> None:
@@ -392,6 +393,7 @@ class Tracker:
         pdf_path: str | None,
         ats: dict[str, Any] | None = None,
         claims: list[dict[str, Any]] | None = None,
+        critiques: list[dict[str, Any]] | None = None,
     ) -> None:
         """Record a CV, its ATS report and its grounding audit.
 
@@ -401,12 +403,13 @@ class Tracker:
         with self._tx() as conn:
             conn.execute(
                 "UPDATE job SET cv_html_path=?, cv_pdf_path=?, ats_json=?,"
-                " claims_json=?, updated_at=? WHERE job_id=?",
+                " claims_json=?, critique_json=?, updated_at=? WHERE job_id=?",
                 (
                     html_path,
                     pdf_path,
                     json.dumps(ats) if ats else None,
                     json.dumps(claims) if claims else None,
+                    json.dumps(critiques) if critiques else None,
                     _now(),
                     job_id,
                 ),

@@ -29,7 +29,7 @@ from typing import Any, Callable, Sequence
 
 from .claude import ClaudeClient, stable_context_for
 from .config import Config
-from .models import Claim, JobPosting, TailorResult, make_job_id
+from .models import Claim, Critique, JobPosting, TailorResult, make_job_id
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +88,28 @@ the semiconductor partner stays anonymous, no compensation specifics).
 
 Never use an em dash (-) or an en dash (-). Use a plain hyphen, a comma, or
 two sentences. This is not negotiable: the candidate does not write that way.
+
+## Density and wording
+
+These are the rules a sharp reader applies. Each one was learned from a real
+review of this CV.
+
+- **One bullet, one outcome.** A bullet carrying four achievements hides all
+  four. Split it. Aim for 25-35 words; never exceed 45.
+- **Lead with the outcome, then how.** "Cut forecasting error 50%, a measured
+  $6M saving" beats three clauses of setup before the number.
+- **Put leadership scope first in a leadership role.** Headcount, team shape
+  and company growth belong at the start of the bullet, not inside it.
+- **Never make a claim that is trivially true.** "A small local model beat a
+  frontier API on latency" is true of any local model and reads as padding.
+  State the condition that makes it hard: at matched quality, on their
+  benchmark, with the magnitude.
+- **Use the conventional term.** "Product-market fit", not "market-fit".
+- **Do not soften a claim the dossier records as measured** into "estimated".
+  Equally, do not harden an estimate into a measurement.
+- Cut connective tissue: "took the initiative to", "extensively used ... to
+  help make customers successful", "a project which had previously". The
+  outcome survives without them.
 
 ## What to tailor
 
@@ -256,6 +278,34 @@ def normalise_dashes(text: str) -> str:
     return re.sub(r" +- +", " - ", text)
 
 
+#: A bullet past this is carrying more than one outcome and hides all of them.
+MAX_BULLET_WORDS = 45
+
+
+def overlong_bullets(html: str, limit: int = MAX_BULLET_WORDS) -> list[tuple[int, str]]:
+    """Bullets long enough that the outcome gets lost inside them.
+
+    Reported rather than rewritten: which achievement to split out is a
+    judgement call, and a mechanical cut would lose the wrong half.
+    """
+    # Skills and publications lines are legitimately long: they are delimited
+    # lists, not prose, and splitting them would be wrong.
+    skip: list[tuple[int, int]] = [
+        (m.start(), m.end())
+        for m in re.finditer(r'<ul class="(?:skills|pub)".*?</ul>', html, re.S | re.I)
+    ]
+
+    findings: list[tuple[int, str]] = []
+    for match in re.finditer(r"<li>(.*?)</li>", html, re.S | re.I):
+        if any(start <= match.start() < end for start, end in skip):
+            continue
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()
+        words = len(text.split())
+        if words > limit:
+            findings.append((words, text[:70]))
+    return findings
+
+
 def protect_keywords(html: str, keywords: Sequence[str]) -> tuple[str, int]:
     """Wrap protected keywords in ``<span class="nb">`` so they cannot wrap.
 
@@ -321,6 +371,9 @@ def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, li
     for pattern, why in FORBIDDEN_CSS:
         if re.search(pattern, html, re.IGNORECASE | re.DOTALL):
             notes.append(f"WARNING: CSS still contains an ATS hazard - {why}")
+
+    for words, snippet in overlong_bullets(html):
+        notes.append(f"dense: a {words}-word bullet hides its outcome - {snippet}...")
 
     html, wrapped = protect_keywords(html, nowrap_keywords)
     if wrapped:
@@ -432,6 +485,94 @@ def fit_to_pages(
     return html, pages, notes
 
 
+ADVERSARIAL_INSTRUCTIONS = """\
+You are a hostile reader of one tailored CV. Not a proofreader and not a
+cheerleader: a sceptical hiring manager who has read six hundred of these and
+is looking for the reason to stop reading this one.
+
+The candidate's dossier and base CV are supplied so you can tell a weak claim
+from a badly-worded strong one. Do not check whether claims are TRUE - a
+separate grounding pass does that. Check whether they are DEFENSIBLE, CLEAR and
+WORTH THE READER'S TIME.
+
+Find, in order of value:
+
+1. **Claims that invite a question the candidate would struggle to answer.**
+   A number with no baseline. A comparison whose conditions are unstated. A
+   causal chain that skips a step, such as a model improvement producing a
+   labour saving with nothing in between.
+2. **Trivially true claims.** "A small local model beat a frontier API on
+   latency" is true of every local model. If the impressive part is a
+   condition (at matched quality, on their benchmark), the claim is hiding it.
+3. **Bullets carrying more than one outcome**, where the best achievement is
+   buried mid-sentence.
+4. **Vague seniority or scope language** where a specific one exists: "worked
+   with", "was involved in", "helped to", "supported".
+5. **Anything that reads as inflation** to someone predisposed to think so:
+   aspirational titles, borrowed credit, plural where the truth is singular.
+6. **Internal inconsistencies**: dates, titles, headcounts that disagree with
+   each other or with the dossier.
+
+Be specific and quote the text. Do not invent problems to fill a quota; an
+empty list is a valid and useful answer. Severity is "blocking" only if you
+would stop reading or doubt the whole document.
+"""
+
+ADVERSARIAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "critiques": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "issue": {"type": "string"},
+                    "severity": {"type": "string", "enum": ["blocking", "major", "minor"]},
+                    "quote": {"type": "string"},
+                    "why": {"type": "string"},
+                    "fix": {"type": "string"},
+                },
+                "required": ["issue", "severity", "quote", "why", "fix"],
+                "additionalProperties": False,
+            },
+        },
+        "overall": {"type": "string"},
+    },
+    "required": ["critiques", "overall"],
+    "additionalProperties": False,
+}
+
+
+def adversarial_review(
+    tailored_html: str, posting: JobPosting, cfg: Config, claude: ClaudeClient
+) -> list[Critique]:
+    """Read the generated CV as a sceptical hiring manager would."""
+    payload = claude.structured(
+        instructions=ADVERSARIAL_INSTRUCTIONS,
+        stable_context=stable_context_for(cfg),
+        user_content=(
+            f"<target_role>{posting.company} - {posting.title}</target_role>\n\n"
+            f"<tailored_cv_text>\n{html_to_text(tailored_html)}\n</tailored_cv_text>\n\n"
+            "Attack this CV. Quote what you object to."
+        ),
+        schema=ADVERSARIAL_SCHEMA,
+        stage="adversarial",
+        dry_run_value={"critiques": [], "overall": "[dry-run]"},
+    )
+    order = {"blocking": 0, "major": 1, "minor": 2}
+    critiques = [
+        Critique(
+            issue=str(c.get("issue", "")),
+            severity=str(c.get("severity", "minor")),
+            quote=str(c.get("quote", "")),
+            why=str(c.get("why", "")),
+            fix=str(c.get("fix", "")),
+        )
+        for c in payload.get("critiques", [])
+    ]
+    return sorted(critiques, key=lambda c: order.get(c.severity, 3))
+
+
 def tailor_instructions(cfg: Config) -> str:
     """Fill the candidate-specific placeholders in TAILOR_INSTRUCTIONS.
 
@@ -451,6 +592,7 @@ def tailor_cv(
     *,
     render: bool = True,
     verify_claims: bool = True,
+    adversarial: bool = True,
     on_delta: Callable[[str], None] | None = None,
 ) -> TailorResult:
     """Generate, harden, render and ground-check a tailored CV."""
@@ -517,6 +659,8 @@ def tailor_cv(
 
     if verify_claims:
         result.claims = ground_claims(html, posting, cfg, claude)
+    if adversarial and not claude.dry_run:
+        result.critiques = adversarial_review(html, posting, cfg, claude)
 
     return result
 

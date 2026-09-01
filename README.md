@@ -402,6 +402,28 @@ carries a role discriminator: one employer can have the same job title open in
 three cities, and naming by company alone means the second letter silently
 overwrites the first.
 
+### The three checks on a tailored CV
+
+Generation is the easy part. Three passes run on the output, and they catch
+different things:
+
+| Pass | Asks | Kind |
+|---|---|---|
+| **Hardening** | Are the ATS invariants intact? Any bullet over 45 words? | Deterministic |
+| **Grounding** | Is every claim traceable to the dossier? | Model, structured |
+| **Adversarial** | Would a sceptical hiring manager stop reading? | Model, structured |
+
+The last one is not a proofreader. It is told explicitly *not* to check whether
+claims are true - grounding does that - but whether they are defensible: a
+number with no baseline, a comparison whose conditions are unstated, a claim
+that is trivially true of anyone, a bullet hiding its best achievement
+mid-sentence, weak agency verbs where ownership is the competency. An empty
+list is a valid answer, and it is told so, because a critic with a quota
+invents problems.
+
+Findings are stored on the job row and shown on the role page, sorted with
+blocking first.
+
 ### 5. `verify` — the ATS verifier
 
 Runnable standalone against any PDF. It reads the **text layer** with `pypdf` —

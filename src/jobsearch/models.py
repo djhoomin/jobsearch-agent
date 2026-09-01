@@ -266,6 +266,20 @@ class Claim:
 
 
 @dataclass
+class Critique:
+    """One adversarial finding against a generated CV."""
+
+    issue: str
+    severity: str = "minor"          # blocking | major | minor
+    quote: str = ""
+    why: str = ""
+    fix: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class TailorResult:
     job_id: str
     html_path: str
@@ -276,6 +290,11 @@ class TailorResult:
     cache_creation_tokens: int = 0
     pages: int | None = None
     fit_notes: list[str] = field(default_factory=list)
+    critiques: list[Critique] = field(default_factory=list)
+
+    @property
+    def blocking(self) -> list[Critique]:
+        return [c for c in self.critiques if c.severity == "blocking"]
 
     @property
     def ungrounded(self) -> list[Claim]:

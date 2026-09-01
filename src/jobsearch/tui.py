@@ -807,6 +807,20 @@ def role_detail_markup(cfg: Config, job_id: str) -> str:
                 for claim in bad:
                     out.append(f"  [yellow]·[/] {e(claim.get('text', ''))}")
 
+    critique_json = _get(row, "critique_json")
+    if critique_json:
+        critiques = json.loads(critique_json)
+        out.append(rule("ADVERSARIAL REVIEW"))
+        if not critiques:
+            out.append("  [green]a sceptical reader found nothing to object to[/]")
+        for c in critiques:
+            colour = {"blocking": "red", "major": "yellow"}.get(c.get("severity"), "dim")
+            out.append(f"  [{colour}]{e(c.get('severity', ''))}[/]  {e(c.get('issue', ''))}")
+            if c.get("quote"):
+                out.append(f"    [dim]\"{e(c['quote'])}\"[/]")
+            if c.get("fix"):
+                out.append(f"    [dim]fix: {e(c['fix'])}[/]")
+
     out.append(rule("YOUR NOTES"))
     if notes_rows:
         for note in notes_rows:
@@ -2073,6 +2087,7 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
                     result.pdf_path,
                     None,
                     [c.to_dict() for c in result.claims],
+                    [c.to_dict() for c in result.critiques],
                 )
             ungrounded = len(result.ungrounded)
             flag = (
@@ -2080,6 +2095,11 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
                 if ungrounded == 0
                 else f"[yellow]{ungrounded} ungrounded claim(s) — review[/]"
             )
+            blocking = len(result.blocking)
+            if blocking:
+                flag += f"  [red]{blocking} blocking critique(s)[/]"
+            elif result.critiques:
+                flag += f"  [dim]{len(result.critiques)} critique(s)[/]"
             name = Path(str(result.pdf_path or result.html_path)).name
             pages = f"  {result.pages}pp" if result.pages else ""
             fit = f"  [dim]({len(result.fit_notes)} compaction step(s))[/]" if result.fit_notes else ""

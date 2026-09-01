@@ -512,3 +512,90 @@ class TestFilenamesAreUniquePerRole:
             JobPosting(company="Abacus.AI", title="Director, Data Science", url="", job_id="x-1234")
         )
         assert "." not in stem and "," not in stem
+
+
+class TestOverlongBullets:
+    """A bullet carrying four achievements hides all four."""
+
+    def test_a_long_experience_bullet_is_reported(self):
+        from jobsearch.tailor import overlong_bullets
+
+        html = "<ul><li>" + " ".join(["word"] * 50) + "</li></ul>"
+        assert overlong_bullets(html)[0][0] == 50
+
+    def test_a_short_one_is_not(self):
+        from jobsearch.tailor import overlong_bullets
+
+        assert overlong_bullets("<ul><li>Cut error 50%, a $6M saving</li></ul>") == []
+
+    def test_skills_and_publication_lists_are_exempt(self):
+        """They are delimited lists, not prose; splitting them would be wrong."""
+        from jobsearch.tailor import overlong_bullets
+
+        long_line = " | ".join(["keyword"] * 40)
+        assert overlong_bullets(f'<ul class="skills"><li>{long_line}</li></ul>') == []
+        assert overlong_bullets(f'<ul class="pub"><li>{long_line}</li></ul>') == []
+
+    def test_markup_does_not_count_towards_the_word_budget(self):
+        from jobsearch.tailor import overlong_bullets
+
+        html = "<ul><li>" + " ".join(f"<span>{w}</span>" for w in ["word"] * 20) + "</li></ul>"
+        assert overlong_bullets(html) == []
+
+    def test_hardening_reports_density(self):
+        from jobsearch.tailor import harden_html
+
+        html = "<ul><li>" + " ".join(["word"] * 60) + "</li></ul>"
+        _, notes = harden_html(html, [])
+        assert any("dense:" in n for n in notes)
+
+
+class TestAdversarialReview:
+    """A sceptical reader, not a proofreader. Checks defensibility, not truth."""
+
+    def _client(self, payload):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            structured=lambda **kw: payload, dry_run=False,
+            last_usage=SimpleNamespace(cache_read_input_tokens=0, cache_creation_input_tokens=0),
+        )
+
+    def test_findings_are_ordered_by_severity(self, cfg):
+        from jobsearch.models import JobPosting
+        from jobsearch.tailor import adversarial_review
+
+        payload = {"critiques": [
+            {"issue": "c", "severity": "minor", "quote": "", "why": "", "fix": ""},
+            {"issue": "a", "severity": "blocking", "quote": "", "why": "", "fix": ""},
+            {"issue": "b", "severity": "major", "quote": "", "why": "", "fix": ""},
+        ], "overall": ""}
+        posting = JobPosting(company="X", title="Y", url="", job_id="j")
+        result = adversarial_review("<p>cv</p>", posting, cfg, self._client(payload))
+        assert [c.issue for c in result] == ["a", "b", "c"]
+
+    def test_an_empty_list_is_a_valid_answer(self, cfg):
+        from jobsearch.models import JobPosting
+        from jobsearch.tailor import adversarial_review
+
+        posting = JobPosting(company="X", title="Y", url="", job_id="j")
+        assert adversarial_review("<p>cv</p>", posting, cfg, self._client({"critiques": [], "overall": "fine"})) == []
+
+    def test_blocking_findings_are_exposed_separately(self):
+        from jobsearch.models import Critique, TailorResult
+
+        result = TailorResult(job_id="j", html_path="x")
+        result.critiques = [Critique(issue="a", severity="blocking"), Critique(issue="b", severity="minor")]
+        assert [c.issue for c in result.blocking] == ["a"]
+
+    def test_the_instructions_separate_defensibility_from_truth(self):
+        """Grounding checks whether claims are true; this checks whether they
+        survive a sceptical reader. Conflating them wastes both passes."""
+        import re
+
+        from jobsearch.tailor import ADVERSARIAL_INSTRUCTIONS
+
+        flat = re.sub(r"\s+", " ", ADVERSARIAL_INSTRUCTIONS.lower())
+        assert "do not check whether claims are true" in flat
+        assert "trivially true" in flat
+        assert "an empty list is a valid" in flat

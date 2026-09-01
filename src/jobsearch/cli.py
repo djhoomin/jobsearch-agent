@@ -278,8 +278,17 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
                 result.pdf_path,
                 ats_payload,
                 [c.to_dict() for c in result.claims],
+                [c.to_dict() for c in result.critiques],
             )
 
+        if result.critiques:
+            print(f"\n  adversarial review: {len(result.critiques)} finding(s)")
+            for c in result.critiques:
+                print(f"    [{c.severity}] {c.issue}")
+                if c.quote:
+                    print(f"        \"{c.quote[:100]}\"")
+                if c.fix:
+                    print(f"        fix: {c.fix}")
         if result.ungrounded:
             print()
             print("Review the ungrounded claims above before sending this CV.")
@@ -309,6 +318,14 @@ def cmd_letter(cfg: Config, args: argparse.Namespace) -> int:
         )
         print(result.text)
         print(f"\n  {result.word_count} words -> {result.path}")
+        if result.critiques:
+            print(f"\n  adversarial review: {len(result.critiques)} finding(s)")
+            for c in result.critiques:
+                print(f"    [{c.severity}] {c.issue}")
+                if c.quote:
+                    print(f"        \"{c.quote[:100]}\"")
+                if c.fix:
+                    print(f"        fix: {c.fix}")
         if result.ungrounded:
             print(f"\n  {len(result.ungrounded)} ungrounded claim(s):")
             for claim in result.ungrounded:

@@ -189,7 +189,13 @@ class FakeClaude:
 
 @pytest.fixture
 def fake_claude() -> FakeClaude:
-    return FakeClaude()
+    fake = FakeClaude()
+    # Every stage the tailor pipeline calls needs a canned response, so a new
+    # stage fails loudly here rather than silently going untested.
+    fake.structured_responses.setdefault(
+        "adversarial", {"critiques": [], "overall": "nothing to object to"}
+    )
+    return fake
 
 
 def chrome_available() -> bool:
