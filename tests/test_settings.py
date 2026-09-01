@@ -163,3 +163,18 @@ class TestProviderSettings:
     def test_a_missing_section_is_a_clear_error(self):
         with pytest.raises(SettingsError, match=r"no \[claude\] section"):
             apply_edits("[other]\nx = 1\n", {"provider": "anthropic"})
+
+
+class TestBaseUrlValidation:
+    def test_an_endpoint_url_is_refused_with_the_fix_in_the_message(self):
+        with pytest.raises(SettingsError, match="API root"):
+            apply_edits(TEMPLATE, {
+                "provider": "openai_compatible",
+                "base_url": "https://openrouter.ai/api/v1/chat/completions",
+            })
+
+    def test_the_api_root_is_accepted(self):
+        apply_edits(TEMPLATE, {
+            "provider": "openai_compatible",
+            "base_url": "https://openrouter.ai/api/v1",
+        })

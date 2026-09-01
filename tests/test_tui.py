@@ -1870,3 +1870,52 @@ class TestBulkScoring:
                 assert len(app.screen_stack) == 1, "no dialog when there is nothing to do"
 
         asyncio.run(scenario())
+
+
+class TestCopyLog:
+    """Errors land in the log pane, which RichLog renders and does not hand
+    back. Copying is exactly what you want at the moment something fails.
+    """
+
+    def test_log_lines_are_captured_as_plain_text(self, cfg):
+        async def scenario():
+            app = build_app(cfg, dry_run=True)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.log_line("[red]NotFoundError:[/] 404 page not found")
+                await pilot.pause()
+                assert "NotFoundError: 404 page not found" in app.log_history
+                assert "[red]" not in "".join(app.log_history), "markup should be stripped"
+
+        asyncio.run(scenario())
+
+    def test_y_copies_the_log(self, cfg, monkeypatch):
+        import jobsearch.tui as tui_mod
+
+        copied = {}
+        monkeypatch.setattr(
+            tui_mod, "copy_to_clipboard",
+            lambda text: copied.setdefault("text", text) and "" or "copied",
+        )
+
+        async def scenario():
+            app = build_app(cfg, dry_run=True)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.log_line("something went wrong")
+                await pilot.press("y")
+                await pilot.pause()
+                assert "something went wrong" in copied["text"]
+
+        asyncio.run(scenario())
+
+    def test_the_history_is_capped(self, cfg):
+        async def scenario():
+            app = build_app(cfg, dry_run=True)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                for i in range(600):
+                    app.log_line(f"line {i}")
+                assert len(app.log_history) <= 500
+
+        asyncio.run(scenario())

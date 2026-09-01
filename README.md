@@ -94,7 +94,7 @@ export OPENROUTER_API_KEY=sk-or-...
 ```toml
 [claude]
 provider    = "openai_compatible"
-base_url    = "https://openrouter.ai/api/v1"
+base_url    = "https://openrouter.ai/api/v1"   # the API root, not /chat/completions
 api_key_env = "OPENROUTER_API_KEY"
 model       = "anthropic/claude-opus-4.1"
 # optional, some endpoints want identifying headers
@@ -149,6 +149,7 @@ behaviour cannot drift between the two.
 | `enter` | Open the role page |
 | `s` `t` `b` `o` `v` | Score · tailor · cover letter · draft outreach · verify the CV |
 | `S` | Score every visible unscored role, with a confirmation first |
+| `y` | Copy the log pane (errors included) |
 | `f` | Scan the boards — pick all tiers or one |
 | `a` | Set status; only legal transitions are offered |
 | `n` | Add a role you found yourself |

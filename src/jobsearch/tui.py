@@ -945,6 +945,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("f", "scan", "Scan boards"),
             Binding("comma", "settings", "Settings"),
             Binding("S", "score_all", "Score all"),
+            Binding("y", "copy_log", "Copy log"),
             Binding("r", "refresh_rows", "Refresh"),
             Binding("slash", "focus_filter", "Filter"),
             Binding("escape", "clear_filter", "Clear", show=False),
@@ -961,6 +962,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.hidden_count = 0
             self.outreach_ids: set[str] = set()
             self.stop_batch = False
+            self.log_history: list[str] = []
             self.rows: list[Any] = []
             self.busy = False
             # The text last rendered into the detail pane. Kept on the app so
@@ -1152,6 +1154,13 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             finally:
                 self.call_from_thread(self.finish_stage)
 
+        def action_copy_log(self) -> None:
+            """Copy the log pane. Errors land here and are not selectable."""
+            if not self.log_history:
+                self.log_line("[dim]log is empty[/]")
+                return
+            self.log_line(copy_to_clipboard("\n".join(self.log_history)))
+
         def action_score_all(self) -> None:
             if self.busy:
                 self.log_line("[yellow]a stage is already running[/]")
@@ -1293,6 +1302,16 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def log_line(self, text: str) -> None:
             self.query_one("#log", RichLog).write(text)
+            # RichLog renders; it does not hand text back. Keep a plain copy so
+            # an error can be copied out, which is exactly when you need it.
+            from rich.markup import render
+
+            try:
+                plain = str(render(text))
+            except Exception:  # noqa: BLE001 - malformed markup must not lose the line
+                plain = text
+            self.log_history.append(plain)
+            del self.log_history[:-500]
 
         def action_stage(self, stage: str) -> None:
             row = self.selected_row()

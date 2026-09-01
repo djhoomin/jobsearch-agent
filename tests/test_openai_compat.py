@@ -148,3 +148,43 @@ class TestCalls:
         client = OpenAICompatibleClient(model="m", base_url="http://local")
         with pytest.raises(ClaudeError, match=r"\.\[openai\]"):
             _ = client.client
+
+
+class TestNormaliseBaseUrl:
+    """Providers document the full endpoint; the SDK appends the path itself.
+    Pasting the documented URL produces a 404 that says nothing about why.
+    """
+
+    def test_it_strips_the_endpoint_path(self):
+        from jobsearch.openai_compat import normalise_base_url
+
+        assert normalise_base_url("https://openrouter.ai/api/v1/chat/completions") == (
+            "https://openrouter.ai/api/v1"
+        )
+
+    def test_a_correct_base_url_is_untouched(self):
+        from jobsearch.openai_compat import normalise_base_url
+
+        assert normalise_base_url("https://openrouter.ai/api/v1") == "https://openrouter.ai/api/v1"
+
+    def test_a_trailing_slash_is_removed(self):
+        from jobsearch.openai_compat import normalise_base_url
+
+        assert normalise_base_url("https://openrouter.ai/api/v1/") == "https://openrouter.ai/api/v1"
+
+    def test_a_local_endpoint_keeps_its_v1(self):
+        """Ollama and vLLM are served at /v1; that is the root, not an endpoint."""
+        from jobsearch.openai_compat import normalise_base_url
+
+        assert normalise_base_url("http://localhost:11434/v1") == "http://localhost:11434/v1"
+
+    def test_it_is_applied_when_building_from_config(self, cfg):
+        from jobsearch.openai_compat import OpenAICompatibleClient
+
+        cfg.raw.setdefault("claude", {}).update({
+            "provider": "openai_compatible",
+            "base_url": "https://openrouter.ai/api/v1/chat/completions",
+            "model": "z-ai/glm-5.3",
+        })
+        client = OpenAICompatibleClient.from_config(cfg, dry_run=True)
+        assert client.base_url == "https://openrouter.ai/api/v1"

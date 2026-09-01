@@ -27,7 +27,33 @@ from typing import Any, Callable, Sequence
 
 from .claude import ClaudeError, Usage
 
-__all__ = ["OpenAICompatibleClient", "extract_json"]
+__all__ = ["OpenAICompatibleClient", "extract_json", "normalise_base_url"]
+
+#: Paths the SDK appends itself. Pasting the full endpoint URL from a
+#: provider's docs is the obvious mistake, and it produces a 404 that says
+#: nothing about the cause.
+_SDK_APPENDED_PATHS = (
+    "/chat/completions",
+    "/completions",
+    "/v1/chat/completions",
+    "/responses",
+)
+
+
+def normalise_base_url(url: str) -> str:
+    """Strip a trailing endpoint path from a base URL.
+
+    The OpenAI SDK appends "/chat/completions" itself, so a base_url that
+    already ends in it requests ".../chat/completions/chat/completions" and
+    404s. Providers document the full endpoint, so this is the natural thing
+    to paste.
+    """
+    cleaned = (url or "").strip().rstrip("/")
+    for path in _SDK_APPENDED_PATHS:
+        if cleaned.lower().endswith(path):
+            cleaned = cleaned[: -len(path)].rstrip("/")
+            break
+    return cleaned
 
 JSON_INSTRUCTION = (
     "Respond with a single JSON object matching the schema below. "
@@ -126,7 +152,7 @@ class OpenAICompatibleClient:
             )
         return cls(
             model=section.get("model", ""),
-            base_url=str(base_url),
+            base_url=normalise_base_url(str(base_url)),
             api_key_env=section.get("api_key_env", "OPENAI_API_KEY"),
             max_tokens=int(section.get("max_tokens", 16000)),
             streaming_max_tokens=int(section.get("streaming_max_tokens", 64000)),

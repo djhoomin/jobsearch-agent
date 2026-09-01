@@ -263,6 +263,13 @@ def apply_edits(
             text = set_or_insert_scalar(text, spec.section, key, checked)
         else:
             text = set_scalar(text, key, checked)
+    base_url = str(edits.get("base_url", "")).strip().rstrip("/").lower()
+    if base_url.endswith(("/chat/completions", "/completions", "/responses")):
+        raise SettingsError(
+            "Base URL should be the API root, not the endpoint: the client appends "
+            '"/chat/completions" itself. Use https://openrouter.ai/api/v1'
+        )
+
     if str(edits.get("provider", "")).strip().lower() == "openai_compatible" and not str(
         edits.get("base_url", "")
     ).strip():
