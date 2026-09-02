@@ -35,6 +35,14 @@ log = logging.getLogger(__name__)
 
 #: CSS the ATS verifier depends on. Injected if the generated CV lacks it.
 ATS_CSS_GUARDS = {
+    "no_ligatures": (
+        r"font-variant-ligatures\s*:\s*none",
+        "  /* ATS: typographic ligatures are single characters in the PDF text\n"
+        '     layer, so "Artificial" extracts as "Arti\ufb01cial" and a keyword\n'
+        "     search for it misses. Turn them off. */\n"
+        "  body { font-variant-ligatures: none; "
+        'font-feature-settings: "liga" 0, "clig" 0, "dlig" 0; }\n',
+    ),
     "nb_nowrap": (
         r"\.nb\s*\{[^}]*white-space\s*:\s*nowrap",
         "  /* ATS: hyphenated keywords must not break across a line, or a literal\n"
@@ -397,10 +405,10 @@ def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, li
     """Re-apply the ATS CSS invariants. Returns ``(html, notes)``."""
     notes: list[str] = []
 
-    for _, (pattern, snippet) in ATS_CSS_GUARDS.items():
+    for name, (pattern, snippet) in ATS_CSS_GUARDS.items():
         if not re.search(pattern, html, re.IGNORECASE | re.DOTALL):
             html = _inject_css(html, snippet)
-            notes.append("injected missing .nb { white-space: nowrap } rule")
+            notes.append(f"injected missing ATS CSS guard: {name}")
 
     dashed = normalise_dashes(html)
     if dashed != html:

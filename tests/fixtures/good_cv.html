@@ -31,6 +31,10 @@
   .edu .erow { margin-bottom: 1.6pt; }
   /* ATS: hyphenated keywords must not break across a line, or a literal
      match like "human-in-the-loop" is lost at the wrap point. */
+  /* ATS: typographic ligatures are single characters in the PDF text
+     layer, so "Artificial" extracts as a single glyph and a keyword
+     search for it misses. Turn them off. */
+  body { font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0, "dlig" 0; }
   .nb { white-space: nowrap; }
   .kw { font-weight: 600; }
 </style>

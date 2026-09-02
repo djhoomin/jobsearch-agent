@@ -318,3 +318,52 @@ class TestEducationChecksQualificationsOnly:
         assert looks_like_a_qualification("MSc: Operations Research")
         assert not looks_like_a_qualification("Languages · English · Afrikaans")
         assert not looks_like_a_qualification("Certifications · none")
+
+
+# --- ligatures ---------------------------------------------------------------
+
+
+def test_a_ligature_is_reported_because_a_keyword_search_would_miss_it():
+    """"Artificial" rendered with an fi ligature is one character in the text
+    layer, so an ATS matching "Artificial Intelligence" finds nothing, and the
+    rendered page looks perfectly normal."""
+    from jobsearch.ats import check_ligatures
+
+    c = check_ligatures("Director of Artiﬁcial Intelligence, ne-tuning and market-ﬁt")
+    assert c.status == "fail"
+    assert "keyword search" in c.message
+    assert any("Artificial" in d for d in c.details)
+
+
+def test_clean_text_passes():
+    from jobsearch.ats import check_ligatures
+
+    assert check_ligatures("Artificial Intelligence, fine-tuning, market-fit").status == "pass"
+
+
+def test_every_ligature_codepoint_is_covered():
+    from jobsearch.ats import LIGATURES, check_ligatures
+
+    for glyph, letters in LIGATURES.items():
+        c = check_ligatures(f"pre{glyph}post")
+        assert c.status == "fail", glyph
+        assert f"pre{letters}post" in c.details[0]
+
+
+def test_the_css_guard_is_injected_when_missing():
+    from jobsearch.tailor import harden_html
+
+    html = "<html><head><style>body { font-size: 9.5pt; }</style></head><body></body></html>"
+    out, notes = harden_html(html)
+    assert "font-variant-ligatures: none" in out
+    assert any("no_ligatures" in n for n in notes)
+
+
+def test_the_css_guard_is_not_duplicated():
+    from jobsearch.tailor import harden_html
+
+    html = ("<html><head><style>body { font-variant-ligatures: none; }</style>"
+            "</head><body></body></html>")
+    out, notes = harden_html(html)
+    assert out.count("font-variant-ligatures") == 1
+    assert not any("no_ligatures" in n for n in notes)

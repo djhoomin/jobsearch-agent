@@ -366,6 +366,42 @@ def check_bullets_inline(text: str) -> Check:
     return Check("bullets_inline", "pass", "bullet markers stay attached to their text")
 
 
+#: Ligature codepoints a PDF text layer can carry, and what they should read as.
+LIGATURES = {
+    "\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl",
+    "\ufb03": "ffi", "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st",
+}
+
+
+def check_ligatures(text: str) -> Check:
+    """Ligatures are one character in the text layer, not two letters.
+
+    This is quieter than the other hazards and costs more: "Artificial"
+    extracts as "Arti<fi>cial", so a keyword search for "Artificial
+    Intelligence" simply misses, and nothing about the rendered page looks
+    wrong. Same for fine-tuning, market-fit, specific, offline.
+    """
+    import re as _re
+
+    hits = sorted({
+        w for w in _re.findall(r"\S*[" + "".join(LIGATURES) + r"]\S*", text)
+    })
+    if not hits:
+        return Check("ligatures", "pass", "no ligatures in the text layer")
+    readable = [w + " (" + _de_ligature(w) + ")" for w in hits[:6]]
+    return Check(
+        "ligatures", "fail",
+        f"{len(hits)} word(s) contain a ligature and will not match a keyword search",
+        details=readable,
+    )
+
+
+def _de_ligature(word: str) -> str:
+    for glyph, letters in LIGATURES.items():
+        word = word.replace(glyph, letters)
+    return word
+
+
 def check_hyphen_wraps(text: str, keywords: Sequence[str]) -> Check:
     """No hyphenated *keyword* may be split across a line wrap.
 
@@ -510,6 +546,7 @@ def verify_pdf(
         check_education_lines(text, all_headings),
         check_bullets_inline(text),
         check_hyphen_wraps(text, nowrap_keywords),
+        check_ligatures(text),
     ]
 
     if not text.strip():
