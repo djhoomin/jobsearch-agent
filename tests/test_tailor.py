@@ -715,3 +715,56 @@ def test_it_gives_up_rather_than_looping(cfg, posting):
     assert claude.calls == 2
     assert result.passes == 2
     assert result.blocking, "still reported, so the user knows to look"
+
+
+# --- the role line is a title, not an argument ------------------------------
+
+
+def test_an_overlong_role_line_is_trimmed_before_it_collides_with_the_date():
+    """It rendered as "engineering below is my ownMay 2024 -" with "commits"
+    orphaned on the next line, because the role sits opposite a right-aligned
+    date in a flex row."""
+    from jobsearch.tailor import trim_role_lines
+
+    html = ('<div class="row"><span class="role">Director of Research and Incubation - '
+            'hands-on throughout; engineering below is my own commits</span>'
+            '<span class="dates">May 2024 - Present</span></div>')
+    out, notes = trim_role_lines(html)
+    assert "engineering below is my own" not in out
+    assert "Director of Research and Incubation" in out
+    assert 'class="dates">May 2024 - Present' in out, "the date column must survive"
+    assert notes and "collide with the date column" in notes[0]
+
+
+def test_a_normal_role_line_is_left_alone():
+    from jobsearch.tailor import trim_role_lines
+
+    for title in ("Director of Data Science",
+                  "Quantitative Analyst, then Senior Quantitative Analyst",
+                  "Customer Facing Data Scientist, then Senior Data Scientist"):
+        html = f'<div class="row"><span class="role">{title}</span><span class="dates">x</span></div>'
+        out, notes = trim_role_lines(html)
+        assert out == html and not notes, title
+
+
+def test_every_role_line_in_a_document_is_checked():
+    from jobsearch.tailor import trim_role_lines
+
+    html = ('<span class="role">Short Title</span>'
+            '<span class="role">A very long role line that goes well past the column, '
+            'with clauses; and more clauses</span>')
+    out, notes = trim_role_lines(html)
+    assert len(notes) == 1
+    assert "Short Title" in out
+
+
+def test_harden_html_applies_the_trim():
+    from jobsearch.tailor import harden_html
+
+    html = ('<html><body><div class="row"><span class="role">Director of Research and '
+            'Incubation, hands-on throughout; engineering below is entirely my own commits'
+            '</span><span class="dates">May 2024 - Present</span></div>'
+            '<h2>Professional Experience</h2></body></html>')
+    out, notes = harden_html(html)
+    assert "entirely my own commits" not in out
+    assert any("role line" in n for n in notes)

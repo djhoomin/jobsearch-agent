@@ -350,6 +350,49 @@ def protect_keywords(html: str, keywords: Sequence[str]) -> tuple[str, int]:
     return "".join(parts), wrapped
 
 
+#: The role line sits in a flex row opposite a right-aligned date. Past roughly
+#: this many characters it collides with the date and wraps, orphaning a word
+#: onto its own line. The base CV's longest is 54.
+MAX_ROLE_CHARS = 64
+
+
+def trim_role_lines(html: str) -> tuple[str, list[str]]:
+    """Keep the job-title field to a job title.
+
+    A tailoring pass asked to justify why a director wants an IC seat once
+    answered inside the <div class="role"> line, which is laid out opposite a
+    right-aligned date. The result rendered as "engineering below is my
+    ownMay 2024 -" with "commits" orphaned below it.
+
+    Anything past the title is a category error rather than content worth
+    keeping in place, so it is cut at the last sensible boundary and reported.
+    The argument belongs in a bullet or the summary.
+    """
+    notes: list[str] = []
+
+    def _trim(match: re.Match[str]) -> str:
+        opening, tag, inner = match.group(0), match.group(1), match.group(2)
+        text = re.sub(r"<[^>]+>", "", inner).strip()
+        if len(text) <= MAX_ROLE_CHARS:
+            return opening
+        cut = text[:MAX_ROLE_CHARS]
+        for sep in (";", " - ", " (", ",", ":"):
+            if sep in cut:
+                cut = cut[: cut.rindex(sep)]
+                break
+        cut = cut.rstrip(" -(,;:")
+        notes.append(
+            f"role line was {len(text)} chars and would collide with the date column; "
+            f"trimmed to {cut!r} (dropped: {text[len(cut):].strip()!r})"
+        )
+        return f"<{tag} class=\"role\">{cut}</{tag}>"
+
+    # span in the shipped template, div in older ones. Matching only one is how
+    # the first version of this passed its tests and did nothing to a real CV.
+    html = re.sub(r'<(span|div) class="role"[^>]*>(.*?)</\1>', _trim, html, flags=re.DOTALL)
+    return html, notes
+
+
 def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, list[str]]:
     """Re-apply the ATS CSS invariants. Returns ``(html, notes)``."""
     notes: list[str] = []
@@ -366,6 +409,9 @@ def harden_html(html: str, nowrap_keywords: Sequence[str] = ()) -> tuple[str, li
 
     html, repairs = repair_ats_html(html)
     notes.extend(repairs)
+
+    html, role_notes = trim_role_lines(html)
+    notes.extend(role_notes)
 
     # Warn only about hazards the repairs could not reach.
     for pattern, why in FORBIDDEN_CSS:
