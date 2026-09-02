@@ -291,9 +291,14 @@ class TailorResult:
     pages: int | None = None
     fit_notes: list[str] = field(default_factory=list)
     critiques: list[Critique] = field(default_factory=list)
+    #: How many generation passes it took, including re-tries after a
+    #: blocking critique.
+    passes: int = 1
+    #: How many prior critiques were fed into the final pass.
+    prior_addressed: int = 0
 
     @property
-    def blocking(self) -> list[Critique]:
+    def blocking(self) -> list[Critique]:  # noqa: D401
         return [c for c in self.critiques if c.severity == "blocking"]
 
     @property

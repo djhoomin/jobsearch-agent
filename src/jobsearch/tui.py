@@ -2131,7 +2131,16 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
                 flag += f"  [red]{blocking} blocking critique(s)[/]"
             elif result.critiques:
                 flag += f"  [dim]{len(result.critiques)} critique(s)[/]"
-            addressed = f"  [dim]addressed {len(prior)} prior finding(s)[/]" if prior else ""
+            passes = getattr(result, "passes", 1)
+            retried = (
+                f"  [dim]re-tailored once to clear a blocking critique[/]"
+                if passes > 1 else ""
+            )
+            addressed = (
+                f"  [dim]addressed {result.prior_addressed} prior finding(s)[/]"
+                if getattr(result, "prior_addressed", 0) else ""
+            )
+            addressed += retried
             name = Path(str(result.pdf_path or result.html_path)).name
             pages = f"  {result.pages}pp" if result.pages else ""
             fit = f"  [dim]({len(result.fit_notes)} compaction step(s))[/]" if result.fit_notes else ""

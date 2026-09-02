@@ -652,3 +652,66 @@ class TestCritiqueFeedbackLoop:
 
         assert load_critiques({}) == []
         assert load_critiques({"critique_json": None}) == []
+
+
+# --- a blocking critique must be acted on, not merely reported --------------
+
+
+class _StubClaude:
+    """Returns a fixed CV, and critiques that clear after the first rewrite."""
+
+    dry_run = False
+
+    def __init__(self, blocking_passes: int = 1):
+        self.blocking_passes = blocking_passes
+        self.calls = 0
+        self.prompts: list[str] = []
+
+        class _U:
+            cache_read_input_tokens = 0
+            cache_creation_input_tokens = 0
+
+        self.last_usage = _U()
+
+    def stream_text(self, *, user_content="", **kw):
+        self.calls += 1
+        self.prompts.append(user_content)
+        return "<html><body><h2>Professional Experience</h2><p>x</p></body></html>"
+
+    def structured(self, *, stage="", **kw):
+        if stage == "ground":
+            return {"claims": [], "verdict": "clean", "summary": ""}
+        if self.calls <= self.blocking_passes:
+            return {"critiques": [{"issue": "Six years is really four",
+                                   "severity": "blocking", "quote": "Six years",
+                                   "why": "arithmetic", "fix": "say four"}]}
+        return {"critiques": []}
+
+
+def test_a_blocking_critique_triggers_a_second_pass(cfg, posting):
+    from jobsearch.tailor import tailor_cv
+
+    claude = _StubClaude(blocking_passes=1)
+    result = tailor_cv(posting, cfg, claude, render=False, verify_claims=False)
+    assert claude.calls == 2, "a blocking critique must be re-tailored, not just reported"
+    assert result.passes == 2
+    assert not result.blocking, "the second pass cleared it"
+
+
+def test_the_second_pass_is_told_what_was_wrong(cfg, posting):
+    from jobsearch.tailor import tailor_cv
+
+    claude = _StubClaude(blocking_passes=1)
+    tailor_cv(posting, cfg, claude, render=False, verify_claims=False)
+    assert "Six years is really four" in claude.prompts[1]
+
+
+def test_it_gives_up_rather_than_looping(cfg, posting):
+    """A blocking issue surviving two passes is a judgement for a person."""
+    from jobsearch.tailor import tailor_cv
+
+    claude = _StubClaude(blocking_passes=99)
+    result = tailor_cv(posting, cfg, claude, render=False, verify_claims=False)
+    assert claude.calls == 2
+    assert result.passes == 2
+    assert result.blocking, "still reported, so the user knows to look"

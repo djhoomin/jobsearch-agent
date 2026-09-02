@@ -585,7 +585,7 @@ def tailor_instructions(cfg: Config) -> str:
     )
 
 
-def tailor_cv(
+def _tailor_once(
     posting: JobPosting,
     cfg: Config,
     claude: ClaudeClient,
@@ -596,7 +596,7 @@ def tailor_cv(
     prior_critiques: Sequence[Critique] = (),
     on_delta: Callable[[str], None] | None = None,
 ) -> TailorResult:
-    """Generate, harden, render and ground-check a tailored CV."""
+    """Generate, harden, render and ground-check a tailored CV. One pass."""
     out_dir = cfg.ensure_output_dir() / "cv"
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = output_stem(posting)
@@ -663,6 +663,54 @@ def tailor_cv(
     if adversarial and not claude.dry_run:
         result.critiques = adversarial_review(html, posting, cfg, claude)
 
+    return result
+
+
+def tailor_cv(
+    posting: JobPosting,
+    cfg: Config,
+    claude: ClaudeClient,
+    *,
+    render: bool = True,
+    verify_claims: bool = True,
+    adversarial: bool = True,
+    prior_critiques: Sequence[Critique] = (),
+    on_delta: Callable[[str], None] | None = None,
+    max_passes: int = 2,
+) -> TailorResult:
+    """Tailor a CV, and re-tailor once if the review finds a blocking problem.
+
+    A blocking critique means the CV should not be sent. Writing it anyway and
+    printing a red count leaves the fix depending on the reader noticing a
+    status line and knowing that the remedy is to run the same command again.
+    The critiques were already being fed forward; they were just being fed to
+    the next run the user happened to start, which might be never.
+
+    Each pass costs a full generation, so this is capped rather than looped
+    until clean. If a blocking issue survives the second pass it is reported
+    and left to a person, which is the right place for a judgement the model
+    has already failed once.
+    """
+    critiques: list[Critique] = list(prior_critiques)
+    result = None
+    for attempt in range(1, max(1, max_passes) + 1):
+        result = _tailor_once(
+            posting, cfg, claude,
+            render=render, verify_claims=verify_claims, adversarial=adversarial,
+            prior_critiques=critiques, on_delta=on_delta,
+        )
+        result.passes = attempt
+        result.prior_addressed = len(critiques)
+        if not result.blocking or attempt >= max(1, max_passes) or claude.dry_run:
+            break
+        log.warning(
+            "pass %d found %d blocking critique(s); re-tailoring: %s",
+            attempt, len(result.blocking),
+            "; ".join(c.issue for c in result.blocking)[:200],
+        )
+        # Feed everything forward, not just the blockers: a major issue left
+        # unfixed on a rewrite tends to come back as a blocking one.
+        critiques = critiques + list(result.critiques)
     return result
 
 
