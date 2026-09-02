@@ -31,3 +31,7 @@ token.json
 
 # macOS
 .DS_Store
+
+# Backups of the local config hold personal data and credentials paths.
+*.bak
+config.local.toml.*
