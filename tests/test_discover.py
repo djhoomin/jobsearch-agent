@@ -176,6 +176,47 @@ class TestTitleFiltering:
     def test_no_include_list_matches_everything(self):
         assert title_matches("Anything", [], [])
 
+    def test_include_terms_match_whole_words_only(self):
+        """The defect this replaced: "ai" was a substring match, so it fired on
+        chAIn, retAIl and mAIntenance. 213 postings entered the pipeline whose
+        only qualification was letters sitting inside an unrelated word."""
+        assert title_matches("AI Scientist", ["ai"], [])
+        assert title_matches("Head of AI", ["ai"], [])
+        assert not title_matches("Supply Chain Data Engineer", ["ai"], [])
+        assert not title_matches("Sr. Solutions Architect - Retail", ["ai"], [])
+        assert not title_matches("Maintenance Planner", ["ai"], [])
+
+    def test_ml_does_not_fire_on_html(self):
+        assert title_matches("Staff ML Engineer", ["ml"], [])
+        assert not title_matches("HTML Email Developer", ["ml"], [])
+
+    def test_exclude_terms_match_whole_words_only(self):
+        """Cuts both ways: substring excludes were over-eager as well."""
+        assert not title_matches("Data Science Intern", ["data"], ["intern"])
+        assert title_matches("Internal Tools Data Lead", ["data"], ["intern"])
+
+    def test_phrases_still_match_across_words(self):
+        assert title_matches("Sr. Forward Deployed Engineer", ["forward deployed"], [])
+        assert title_matches("Head of Solutions Engineering", ["solutions engineering"], [])
+
+    def test_require_any_is_a_second_axis_not_a_second_chance(self):
+        """`include` is seniority, `require_any` is subject. The AND only bites
+        while the lists stay disjoint - a seniority word in both collapses it
+        back to an OR, which is how "Director Global Benefits" got in."""
+        seniority, subject = ["director"], ["ai", "machine learning"]
+        assert title_matches("Director of AI", seniority, [], subject)
+        assert not title_matches("Director Global Benefits", seniority, [], subject)
+        # The regression itself: "director" present in both lists lets anything
+        # with the word "director" through, however unrelated.
+        assert title_matches("Director Global Benefits", seniority, [], subject + ["director"])
+
+    def test_leadership_phrases_admit_the_role_without_admitting_the_noise(self):
+        """A target company's "Director of Product" is the AI seat even when the
+        title never says AI. Caught as a phrase, so the HR director stays out."""
+        subject = ["ai", "director of product"]
+        assert title_matches("Director of Product", ["director"], [], subject)
+        assert not title_matches("Director Global Benefits", ["director"], [], subject)
+
     def test_filter_postings_uses_config(self, cfg):
         from jobsearch.models import JobPosting
 

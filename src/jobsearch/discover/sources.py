@@ -357,6 +357,14 @@ def fetch_board(board: BoardRef, fetcher: Fetcher) -> list[JobPosting]:
 # ---------------------------------------------------------------------------
 
 
+def _word(term: str, needle: str) -> bool:
+    """True when ``term`` appears in ``needle`` as a whole word or phrase."""
+    term = (term or "").strip().lower()
+    if not term:
+        return False
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", needle) is not None
+
+
 def title_matches(
     title: str,
     include: Iterable[str],
@@ -371,19 +379,19 @@ def title_matches(
     want. Requiring at least one subject-matter word separates them without
     having to enumerate every platform speciality in ``exclude``.
 
-    Matched on word boundaries, so "ai" does not fire on "maintain" or
-    "Ukraine", and "ml" does not fire on "html".
+    All three lists are matched on word boundaries, so "ai" does not fire on
+    "maintain", "Ukraine" or "supply chain", and "ml" does not fire on "html".
+    Substring matching here was a real defect rather than a nicety: "ai" alone
+    admitted 213 postings whose only qualification was the letters inside
+    another word.
     """
     needle = (title or "").lower()
-    if any(term.lower() in needle for term in exclude):
+    if any(_word(term, needle) for term in exclude):
         return False
     include = list(include)
-    if include and not any(term.lower() in needle for term in include):
+    if include and not any(_word(term, needle) for term in include):
         return False
-    require_any = [t.lower() for t in require_any if t.strip()]
-    if require_any and not any(
-        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", needle) for term in require_any
-    ):
+    if require_any and not any(_word(term, needle) for term in require_any):
         return False
     return True
 
