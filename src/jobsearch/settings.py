@@ -89,8 +89,9 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         "provider", "claude", "Provider", "choice",
         "anthropic uses the native SDK with prompt caching; openai_compatible "
-        "speaks chat-completions to any OpenAI-shaped endpoint.",
-        choices=("anthropic", "openai_compatible"),
+        "speaks chat-completions to any OpenAI-shaped endpoint; claude_code "
+        "runs the local claude CLI headlessly on your subscription.",
+        choices=("anthropic", "openai_compatible", "claude_code"),
         insert_if_missing=True,
     ),
     SettingSpec(

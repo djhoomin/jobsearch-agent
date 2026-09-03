@@ -35,6 +35,22 @@ db_path = "output/jobsearch.db"
 # given a stable prefix, and Anthropic and Qwen get explicit cache_control
 # breakpoints. What you give up is guaranteed structured output: response_format
 # is sent, but a JSON object is extracted from the text when it is ignored.
+#
+# provider = "claude_code" runs every stage as one headless `claude -p` call
+# against the CLI you already have logged in, so the work comes out of included
+# subscription usage instead of metered API spend. Structured output and prompt
+# caching both survive (measured: 9.5K tokens read from cache on the second
+# call). What you pay instead is about a second of process startup per call, and
+# max_tokens is not settable - a truncated generation is reported rather than
+# capped.
+#
+#   provider = "claude_code"
+#   model    = "claude-opus-5"
+#   binary   = "claude"     # or a full path if it is not on PATH
+#   timeout  = 900          # seconds; a full CV tailoring runs for minutes
+#   use_subscription = true # drop ANTHROPIC_API_KEY from the CLI's environment,
+#                           # so a stray key cannot silently bill the API
+#   extra_args = []         # appended verbatim, e.g. ["--fallback-model", "sonnet"]
 provider = "anthropic"
 model = "claude-opus-5"
 # Non-streaming calls (scoring, grounding checks, outreach drafts).

@@ -54,6 +54,11 @@ def _print_usage(client) -> None:
     if usage.input_tokens or usage.cache_read_input_tokens:
         note = "cache HIT" if usage.cache_hit else "cache miss (first call warms it)"
         print(f"  tokens: {usage.describe()}  [{note}]")
+    # The headless-CLI provider reports what the same tokens would have cost on
+    # the metered API. Nothing is billed, so it is shown as avoided, not spent.
+    avoided = getattr(client, "last_cost_usd", 0.0)
+    if avoided:
+        print(f"  ${avoided:.4f} of API spend avoided (ran on your subscription)")
 
 
 def _fmt_score(value: Any) -> str:

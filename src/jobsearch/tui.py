@@ -1441,7 +1441,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                             yield Static(
                                 "[dim]anthropic keeps prompt caching, which usually "
                                 "dominates cost. openai_compatible needs a Base URL "
-                                "and pip install -e '.[openai]'.[/]"
+                                "and pip install -e '.[openai]'. claude_code runs the "
+                                "local claude CLI on your subscription: no API spend, "
+                                "about a second of startup per call.[/]"
                             )
                     value = values.get(spec.key)
                     shown = ", ".join(value) if isinstance(value, list) else str(

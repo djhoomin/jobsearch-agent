@@ -304,7 +304,10 @@ def make_client(cfg, dry_run: bool = False) -> Any:
     ``provider`` defaults to "anthropic". The Anthropic path is the native SDK
     with structured outputs and explicit cache_control; "openai_compatible"
     speaks chat-completions to any OpenAI-shaped endpoint (OpenRouter,
-    Together, Groq, vLLM, Ollama) and gives up explicit caching to do so.
+    Together, Groq, vLLM, Ollama) and gives up explicit caching to do so;
+    "claude_code" shells out to the local ``claude -p`` CLI, which keeps
+    structured output and caching but bills against whatever that binary is
+    logged in with - included subscription usage rather than the API.
     """
     provider = str(cfg.get("claude", "provider", "anthropic") or "anthropic").lower()
     if provider in {"anthropic", "claude", ""}:
@@ -313,7 +316,11 @@ def make_client(cfg, dry_run: bool = False) -> Any:
         from .openai_compat import OpenAICompatibleClient
 
         return OpenAICompatibleClient.from_config(cfg, dry_run=dry_run)
+    if provider in {"claude_code", "cli", "headless"}:
+        from .claude_code import ClaudeCodeClient
+
+        return ClaudeCodeClient.from_config(cfg, dry_run=dry_run)
     raise ClaudeError(
         f'Unknown [claude].provider "{provider}". '
-        'Use "anthropic" or "openai_compatible".'
+        'Use "anthropic", "openai_compatible" or "claude_code".'
     )

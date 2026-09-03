@@ -71,7 +71,7 @@ automatically.
 
 ### Model provider and credentials
 
-Two providers are supported. `anthropic` is the default and needs nothing in
+Three providers are supported. `anthropic` is the default and needs nothing in
 the config.
 
 **Anthropic (default).** The client is constructed zero-arg, so it picks up
@@ -101,10 +101,33 @@ model       = "anthropic/claude-opus-4.1"
 extra_headers = { "HTTP-Referer" = "https://github.com/you/jobsearch-agent" }
 ```
 
+**The local Claude Code CLI, headless.** Every stage runs as one `claude -p`
+call against the binary you already have logged in, so the work comes out of
+included subscription usage instead of metered API spend:
+
+```toml
+[claude]
+provider = "claude_code"
+model    = "claude-opus-5"
+# binary  = "claude"     # a full path, if it is not on PATH
+# timeout = 900          # seconds; a full CV tailoring runs for minutes
+# use_subscription = true  # drop ANTHROPIC_API_KEY from the CLI's environment
+```
+
+This path keeps both of the things the OpenAI path gives up. Structured output
+is real (`--json-schema` validates server-side and the envelope carries a
+parsed object), and prompt caching survives across separate processes: measured
+on this repo's own prefix, the second call read 22,041 tokens from cache and
+the list price fell from $0.23 to $0.02. What it costs instead is about a
+second of process startup per call, and `max_tokens` is not settable — a
+generation that hits the model's output ceiling is reported rather than capped.
+The prefix is assembled block for block as the Anthropic path assembles it, so
+the two are directly comparable and a warm cache is shared between them.
+
 Or set it in the TUI: `,` then the **Model and provider** group. Switching to
 `openai_compatible` without a `base_url` is refused before anything is written.
 
-The two paths are siblings, not a shim over one another: Anthropic keeps its
+The three paths are siblings, not shims over one another: Anthropic keeps its
 native SDK, structured outputs and explicit `cache_control`. What you give up
 on the OpenAI path is covered under [Cost](#cost) — read it before switching,
 because a nominally cheaper model can cost more per role.
@@ -608,9 +631,18 @@ Then `jobsearch doctor --boards` to confirm the token resolves.
 
 ## Cost
 
-A Claude Pro/Max subscription does not cover this: it calls the Anthropic API
-directly, so usage bills to the API platform whether you authenticate with
-`ANTHROPIC_API_KEY` or an `ant auth login` profile.
+By default this calls the Anthropic API directly, so usage bills to the API
+platform whether you authenticate with `ANTHROPIC_API_KEY` or an `ant auth
+login` profile. A Claude Pro/Max subscription does not cover that.
+
+**`provider = "claude_code"`** does put it on the subscription, by running each
+stage through the local `claude -p` CLI instead. It is the cheapest option by a
+wide margin if you already pay for Claude Code and have headroom, and it gives
+up neither structured output nor prompt caching to get there — see
+[Model provider and credentials](#model-provider-and-credentials). What you
+trade is a second of process startup per call, no `max_tokens` ceiling, and a
+failure mode the API path does not have: running out of included usage
+mid-search. That is reported as such rather than as a bare exit code.
 
 **[Another provider](#model-provider-and-credentials)** is an option, but read
 what it costs first. On an OpenAI-compatible endpoint you lose explicit prompt
@@ -621,7 +653,7 @@ lose guaranteed structured output, since endpoints vary in whether they honour
 option earns its place for genuinely different models, such as a local one for
 the cheap stages, rather than as a cheaper route to the same model.
 
-What is available on either provider:
+What is available on every provider:
 
 - **Prompt caching**, below — the dossier and base CV are a large stable prefix,
   and caching them is the single biggest saving.
