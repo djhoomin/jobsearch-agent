@@ -675,6 +675,18 @@ def _tailor_once(
             "Tailoring produced something that is not an HTML CV. "
             "Re-run; if it persists, check the model id in config.toml."
         )
+    # A re-tailor pass sometimes echoes the previous draft and appends the new
+    # one, producing a single file containing two complete CVs. Nothing
+    # downstream notices: the page fitter dutifully compacts it, the render
+    # succeeds, and the result is a three-page ATS failure whose cause is
+    # invisible unless you open the HTML. One header block per document.
+    headers = html.count("<h1")
+    if headers > 1 and not claude.dry_run:
+        raise RuntimeError(
+            f"Tailoring produced {headers} CVs in one document (expected 1): the "
+            "model echoed a previous draft alongside the new one. Nothing was "
+            "saved. Re-run the stage."
+        )
     html, notes = harden_html(html, cfg.get("ats", "nowrap_keywords", []) or [])
     for note in notes:
         log.warning("%s", note)

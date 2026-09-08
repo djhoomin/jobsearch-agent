@@ -657,6 +657,61 @@ class TestCritiqueFeedbackLoop:
 # --- a blocking critique must be acted on, not merely reported --------------
 
 
+class TestDoubledDocumentGuard:
+    """A re-tailor pass that echoes the previous draft must not be saved.
+
+    The failure it prevents is silent: two complete CVs in one file still
+    render and still compact, and surface only as an unexplained three-page
+    ATS failure. Observed on a real run (DevRev, 2026-09-08), where six
+    compaction steps ran against a document containing two of everything.
+    """
+
+    ONE_CV = (
+        '<div class="head"><h1>Dirk Johannes (DJ) Human</h1></div>'
+        "<h2>Professional Summary</h2><p>Summary.</p>"
+        "<h2>Professional Experience</h2><ul><li>Did a thing</li></ul>"
+    )
+
+    class _Client:
+        dry_run = False
+
+        def __init__(self, html):
+            self._html = html
+
+            class _U:
+                cache_read_input_tokens = 0
+                cache_creation_input_tokens = 0
+
+            self.last_usage = _U()
+
+        def stream_text(self, **kw):
+            return self._html
+
+        def structured(self, **kw):
+            return {"claims": [], "verdict": "clean", "summary": "", "critiques": []}
+
+    def _posting(self):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(company="Acme", title="Head of AI", url="", job_id="j")
+
+    def test_two_cvs_in_one_document_is_refused(self, cfg):
+        from jobsearch.tailor import _tailor_once
+
+        client = self._Client(self.ONE_CV * 2)
+        with pytest.raises(RuntimeError, match="2 CVs in one document"):
+            _tailor_once(self._posting(), cfg, client,
+                         render=False, verify_claims=False, adversarial=False)
+
+    def test_a_single_cv_still_passes(self, cfg):
+        from jobsearch.tailor import _tailor_once
+
+        client = self._Client(self.ONE_CV)
+        result = _tailor_once(self._posting(), cfg, client,
+                              render=False, verify_claims=False, adversarial=False)
+        assert result.html_path
+
+
 class _StubClaude:
     """Returns a fixed CV, and critiques that clear after the first rewrite."""
 
