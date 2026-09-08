@@ -2113,12 +2113,24 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
 
             prior = load_critiques(tracker.get_job(job_id))
             result = tailor_cv(posting, cfg, client, prior_critiques=prior)
+            # Verify here rather than leaving it to the `v` key. The CLI path
+            # does this, and skipping it stored ats_json = None, so a role page
+            # showed no ATS result after a successful tailor and the step read
+            # as though it had not produced anything.
+            ats_payload = None
+            if result.pdf_path and not dry_run:
+                from .ats import verify_from_config
+
+                ats_report = verify_from_config(
+                    cfg, result.pdf_path, jd_text=posting.description
+                )
+                ats_payload = ats_report.to_dict()
             if not dry_run:
                 tracker.save_cv(
                     job_id,
                     str(result.html_path),
                     result.pdf_path,
-                    None,
+                    ats_payload,
                     [c.to_dict() for c in result.claims],
                     [c.to_dict() for c in result.critiques],
                 )
@@ -2146,7 +2158,11 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
             name = Path(str(result.pdf_path or result.html_path)).name
             pages = f"  {result.pages}pp" if result.pages else ""
             fit = f"  [dim]({len(result.fit_notes)} compaction step(s))[/]" if result.fit_notes else ""
-            return f"tailored {name}{pages}{fit}{addressed}  {flag}  [dim]press v to verify[/]"
+            ats = ""
+            if ats_payload is not None:
+                ats = ("  [green]ATS PASS[/]" if ats_payload.get("passed")
+                       else "  [red]ATS FAIL[/]")
+            return f"tailored {name}{pages}{ats}{fit}{addressed}  {flag}"
 
         if stage == "letter":
             from .letter import write_letter
