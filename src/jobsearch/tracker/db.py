@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
 from ..models import (
     Contact,
@@ -171,6 +171,11 @@ class Tracker:
         ("job", "letter_path TEXT"),
         ("job", "letter_claims_json TEXT"),
         ("job", "critique_json TEXT"),
+        # When a board last RETURNED this posting, as distinct from when the row
+        # was last written. Without it, a delisted role and a board nobody has
+        # swept recently look identical: both simply stop being refreshed, and
+        # the row sits at Not started looking live indefinitely.
+        ("job", "last_seen_at TEXT"),
     )
 
     def _add_missing_columns(self) -> None:
@@ -182,6 +187,26 @@ class Tracker:
             if column not in existing:
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
         self._conn.commit()
+
+    def mark_seen(self, job_ids: Iterable[str]) -> int:
+        """Record that a board still lists these postings. Never inserts.
+
+        Called with every job_id a sweep returned BEFORE title filtering, so a
+        role that is still on the board but no longer matches the filters keeps
+        a fresh ``last_seen_at`` instead of looking delisted. Rows that do not
+        exist are ignored: a posting that was filtered out and was never tracked
+        should not be created just because it was seen.
+        """
+        ids = [str(j) for j in job_ids if j]
+        if not ids:
+            return 0
+        now = _now()
+        with self._tx() as conn:
+            cursor = conn.executemany(
+                "UPDATE job SET last_seen_at=? WHERE job_id=?",
+                [(now, job_id) for job_id in ids],
+            )
+            return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
 
     def upsert_job(
         self, posting: JobPosting, status: Status = Status.NOT_STARTED
@@ -199,7 +224,7 @@ class Tracker:
                     """
                     UPDATE job SET company=?, title=?, url=?, source=?, location=?,
                         department=?, description=?, salary_text=?, board_tier=?,
-                        ind_sponsor=?, updated_at=?
+                        ind_sponsor=?, updated_at=?, last_seen_at=?
                     WHERE job_id=?
                     """,
                     (
@@ -214,6 +239,7 @@ class Tracker:
                         posting.board_tier,
                         posting.ind_sponsor,
                         now,
+                        now,
                         posting.job_id,
                     ),
                 )
@@ -222,8 +248,8 @@ class Tracker:
                     """
                     INSERT INTO job (job_id, company, title, url, source, location,
                         department, description, salary_text, board_tier, ind_sponsor,
-                        discovered_at, status, created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        discovered_at, status, created_at, updated_at, last_seen_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         posting.job_id,
@@ -239,6 +265,7 @@ class Tracker:
                         posting.ind_sponsor,
                         posting.discovered_at,
                         status.value,
+                        now,
                         now,
                         now,
                     ),

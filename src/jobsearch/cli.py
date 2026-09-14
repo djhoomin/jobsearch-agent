@@ -118,7 +118,13 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
                 new += 1
             tracker.upsert_job(posting)
             print(f"  {posting.summary_line()}")
+        # Refresh last_seen_at for everything the boards returned, including
+        # postings the title filter dropped. Otherwise tightening the filters
+        # makes live roles look delisted.
+        refreshed = tracker.mark_seen(getattr(report, "seen_job_ids", ()) or ())
         print(f"\n{new} new posting(s) added to {cfg.db_path}")
+        if refreshed:
+            print(f"{refreshed} tracked posting(s) confirmed still listed")
     finally:
         tracker.close()
     return 0
@@ -426,6 +432,27 @@ def _gmail_draft(cfg, args, draft, posting, tracker) -> None:
 # ---------------------------------------------------------------------------
 # track / status
 # ---------------------------------------------------------------------------
+
+
+def cmd_stale(cfg: Config, args: argparse.Namespace) -> int:
+    """Report roles a board has stopped returning. Reports only, changes nothing."""
+    from .stale import find_stale
+
+    tracker = _tracker(cfg)
+    try:
+        report = find_stale(
+            tracker.list_jobs(limit=100000), grace_hours=args.grace_hours
+        )
+        print(report.render())
+        if report.delisted:
+            print()
+            print(
+                "Nothing has been changed. To close one: "
+                "jobsearch track <job-id> --status Withdrawn --reason 'no longer listed'"
+            )
+    finally:
+        tracker.close()
+    return 0
 
 
 def cmd_track(cfg: Config, args: argparse.Namespace) -> int:
@@ -914,6 +941,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--note")
     p.add_argument("--history", action="store_true", help="Print the status history")
     p.set_defaults(func=cmd_track)
+
+    # stale
+    p = sub.add_parser(
+        "stale",
+        help="Roles a board has stopped returning",
+        description=(
+            "Lists tracked roles that a board was swept for and did not return, so "
+            "they are very likely delisted. Reports only; nothing is changed. Roles "
+            "on boards not swept since last_seen_at was introduced are listed "
+            "separately as unproven rather than assumed dead."
+        ),
+    )
+    p.add_argument(
+        "--grace-hours", type=int, default=36,
+        help="How far behind its company's latest sighting a row may fall before "
+             "it counts as delisted (default 36)",
+    )
+    p.set_defaults(func=cmd_stale)
 
     # status
     p = sub.add_parser("status", help="List tracked jobs")

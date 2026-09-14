@@ -30,6 +30,9 @@ class DiscoveryReport:
     errors: list[str] = field(default_factory=list)
     boards_checked: int = 0
     raw_count: int = 0
+    #: Every job_id the boards returned this run, before title filtering. This
+    #: is what "still listed" means; `postings` is only what also matched.
+    seen_job_ids: set[str] = field(default_factory=set)
 
     def dedupe(self) -> "DiscoveryReport":
         seen: set[str] = set()
@@ -73,6 +76,11 @@ def discover(
         report.raw_count += len(found)
         report.postings.extend(found)
 
+    # Record what the boards actually returned BEFORE filtering. last_seen_at
+    # must mean "the board still lists this", not "it still matches my title
+    # filters": those are different facts, and conflating them reports a live
+    # posting as delisted the moment the filters are tightened.
+    report.seen_job_ids = {p.job_id for p in report.postings}
     if apply_title_filter:
         report.postings = filter_postings(report.postings, cfg)
     return report.dedupe()
