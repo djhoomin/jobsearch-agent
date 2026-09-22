@@ -12,7 +12,9 @@ The rules are deliberately narrow:
 
 - A definite FAIL from the code is never touched.
 - An UNKNOWN becomes FAIL above ``fail_above``, PASS below ``pass_below``, and
-  otherwise stays UNKNOWN with the probability noted in its reason.
+  otherwise stays UNKNOWN with the probability noted in its reason. Visa is
+  the exception: its UNKNOWN means the employer is not on the IND register,
+  which posting text cannot clear, so Jev can only fail or flag it.
 - A PASS the code reached by lookup (an IND-listed employer, say) is kept, but
   gets an advisory when the posting text contradicts it above ``flag_above``.
 
@@ -33,25 +35,65 @@ from typing import Callable
 from .config import Config
 from .models import ConstraintReport, ConstraintResult, JobPosting, Verdict
 
-#: Question name -> (constraint it informs, what a "yes" means, the question).
-NOULS: dict[str, tuple[str, str, str]] = {
-    "rules_out_sponsorship": (
-        "visa",
-        "the posting rules out visa sponsorship or requires existing work authorisation",
-        "Does the posting state that visa sponsorship is not available, or that "
-        "existing work authorisation is required?",
+BOILERPLATE = (
+    "generic equal-opportunity boilerplate such as 'applicants must be authorized "
+    "to work in the country in which they apply'"
+)
+
+
+@dataclass(frozen=True)
+class Question:
+    """One yes/no question about the posting and the constraint it informs."""
+
+    constraint: str
+    #: What a "yes" means, in words that read well after "the posting suggests".
+    meaning: str
+    instructions: str
+    #: Descriptions of what a yes and a no look like. Jev reads them; they are
+    #: what keeps boilerplate from counting as a refusal.
+    criteria: dict[str, str] | None = None
+    #: Whether a confident "no" may turn UNKNOWN into PASS. Posting text can
+    #: clear a travel or location doubt, because those doubts came from the
+    #: text. It cannot clear a visa doubt: that one means the employer is not
+    #: on the IND register, and no wording in a posting changes that.
+    can_clear: bool = True
+
+
+NOULS: dict[str, Question] = {
+    "rules_out_sponsorship": Question(
+        constraint="visa",
+        meaning="a candidate who needs Dutch sponsorship could not get it for this role",
+        instructions=(
+            "Would a candidate who needs a Dutch (Netherlands) work visa be unable "
+            "to get sponsorship for this role?"
+        ),
+        criteria={
+            "true": (
+                "The employer says it will not sponsor, requires existing work "
+                "authorisation for a named country, or sponsors visas only for a "
+                "country other than the Netherlands (e.g. 'we can sponsor visas to "
+                "Germany; for any other country you need an existing right to work')."
+            ),
+            "false": (
+                "The employer offers sponsorship without restricting it to another "
+                f"country, or says nothing beyond {BOILERPLATE}."
+            ),
+        },
+        can_clear=False,
     ),
-    "weekly_travel": (
-        "travel",
-        "the posting requires weekly travel or more than 25% travel",
-        "Does the posting require weekly travel, or travel above 25% of the time?",
+    "weekly_travel": Question(
+        constraint="travel",
+        meaning="the posting requires weekly travel or more than 25% travel",
+        instructions="Does the posting require weekly travel, or travel above 25% of the time?",
     ),
-    "outside_europe": (
-        "location",
-        "the role cannot be done from the Netherlands or remote within Europe",
-        "Is this role impossible to do from the Netherlands or remote within Europe "
-        "(for example US-only, on-site outside Europe, or remote restricted to "
-        "non-European countries)?",
+    "outside_europe": Question(
+        constraint="location",
+        meaning="the role cannot be done from the Netherlands or remote within Europe",
+        instructions=(
+            "Is this role impossible to do from the Netherlands or remote within Europe "
+            "(for example US-only, on-site outside Europe, or remote restricted to "
+            "non-European countries)?"
+        ),
     ),
 }
 
@@ -110,7 +152,9 @@ def reader_for(settings: SystemOneSettings) -> Reader | None:
         _warn("[systemone] enabled but typesafe-sdk is not installed; pip install -e '.[systemone]'")
         return None
 
-    questions = {name: Noul(instructions=q) for name, (_, _, q) in NOULS.items()}
+    questions = {
+        name: Noul(instructions=q.instructions, criteria=q.criteria) for name, q in NOULS.items()
+    }
     client = TypeSafeClient(api_key=settings.api_key, model=settings.model, timeout=settings.timeout)
 
     def read(posting: JobPosting) -> dict[str, float] | None:
@@ -129,9 +173,10 @@ def apply_readings(
     """
     by_name = {r.name: r for r in report.results}
     touched: list[ConstraintResult] = []
-    for noul, (cname, meaning, _) in NOULS.items():
+    for noul, q in NOULS.items():
         p = probs.get(noul)
-        result = by_name.get(cname)
+        result = by_name.get(q.constraint)
+        meaning = q.meaning
         if p is None or result is None:
             continue
         tag = f"jev {noul}={p:.2f}"
@@ -141,7 +186,7 @@ def apply_readings(
                 result.reason = f"Jev reads the posting: {meaning} (p={p:.2f}). Code said: {result.reason}"
                 result.evidence = tag
                 touched.append(result)
-            elif p <= settings.pass_below:
+            elif p <= settings.pass_below and q.can_clear:
                 result.verdict = Verdict.PASS
                 result.reason = f"Jev reads no sign that {meaning} (p={p:.2f}). Code said: {result.reason}"
                 result.evidence = tag

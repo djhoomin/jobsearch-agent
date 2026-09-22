@@ -368,7 +368,9 @@ These checks are phrase lists, so they are silent when a posting says the same
 thing in other words. With `[systemone]` enabled, TypeSafe's Jev (a decision
 model that returns calibrated yes/no probabilities and no text) reads the
 posting after the code has ruled. It turns an `unknown` into a pass or fail when
-it is confident, leaves it `unknown` with the probability noted when it is not,
+it is confident (visa can only fail this way, since its `unknown` means the
+employer is not on the IND register), leaves it `unknown` with the probability
+noted when it is not,
 and adds a `CHECK` line to a pass the code reached by lookup when the text
 argues against it. It never overturns a fail, only posting text is sent, and
 with no key or no SDK installed nothing changes. Install with

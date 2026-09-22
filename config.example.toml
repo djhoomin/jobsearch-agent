@@ -80,7 +80,9 @@ enabled = false
 api_key_env = "TYPESAFE_API_KEY"
 model = "jev-latest"
 # An UNKNOWN verdict becomes FAIL at or above fail_above, PASS at or below
-# pass_below, and otherwise stays UNKNOWN with the probability noted.
+# pass_below, and otherwise stays UNKNOWN with the probability noted. Visa is
+# never cleared this way: its UNKNOWN means the employer is not on the IND
+# register, which no posting wording changes.
 fail_above = 0.8
 pass_below = 0.2
 # A PASS the code reached by lookup (an IND-listed employer) is kept, but gets

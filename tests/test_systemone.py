@@ -44,6 +44,18 @@ class TestApplyReadings:
         apply_readings(report, {"outside_europe": 0.05}, SETTINGS)
         assert report.results[0].verdict is Verdict.PASS
 
+    def test_visa_unknown_is_never_cleared_by_text(self):
+        # UNKNOWN visa means "not on the IND register"; a posting cannot fix that.
+        report = report_with(visa=Verdict.UNKNOWN)
+        touched = apply_readings(report, {"rules_out_sponsorship": 0.02}, SETTINGS)
+        assert report.results[0].verdict is Verdict.UNKNOWN
+        assert touched == []
+
+    def test_visa_unknown_can_still_fail(self):
+        report = report_with(visa=Verdict.UNKNOWN)
+        apply_readings(report, {"rules_out_sponsorship": 0.96}, SETTINGS)
+        assert report.results[0].verdict is Verdict.FAIL
+
     def test_unknown_stays_unknown_in_between(self):
         report = report_with(travel=Verdict.UNKNOWN)
         touched = apply_readings(report, {"weekly_travel": 0.5}, SETTINGS)
@@ -96,7 +108,10 @@ class TestPostingState:
         assert state["stated_compensation"] == "not stated"
 
     def test_every_noul_maps_to_a_real_constraint(self):
-        assert {c for c, _, _ in NOULS.values()} == {"visa", "travel", "location"}
+        assert {q.constraint for q in NOULS.values()} == {"visa", "travel", "location"}
+
+    def test_visa_question_describes_boilerplate_as_a_no(self):
+        assert "boilerplate" in NOULS["rules_out_sponsorship"].criteria["false"]
 
 
 class TestRefineConstraints:
@@ -177,4 +192,4 @@ class TestScorePostingIntegration:
             systemone_reader=lambda p: {"rules_out_sponsorship": 0.01, "weekly_travel": 0.02, "outside_europe": 0.03},
         )
         assert not report.eliminated
-        assert "Unverified" not in report.notes
+        assert "travel" not in report.notes and "location" not in report.notes
