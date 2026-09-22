@@ -394,6 +394,10 @@ The most careful stage, in three steps:
 2. **Harden.** Deterministic post-processing re-applies the ATS CSS invariants
    the template depends on and warns loudly if the generated stylesheet
    reintroduces a known hazard.
+   Notes you have written on the role (`n` in the TUI, `track --note` on the
+   CLI) go into the prompt too. They are the one channel for a decision the
+   model cannot make alone, such as which of two titles to lead with; they
+   cannot make a claim grounded.
 3. **Verify grounding.** A second, structured call takes the generated CV back
    and audits every claim against the dossier and the base CV, returning the
    evidence for each. **Anything it cannot ground is printed in full and the

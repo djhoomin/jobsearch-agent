@@ -678,6 +678,7 @@ def _tailor_once(
     verify_claims: bool = True,
     adversarial: bool = True,
     prior_critiques: Sequence[Critique] = (),
+    notes: Sequence[str] = (),
     on_delta: Callable[[str], None] | None = None,
 ) -> TailorResult:
     """Generate, harden, render and ground-check a tailored CV. One pass."""
@@ -692,7 +693,7 @@ def _tailor_once(
     html = claude.stream_text(
         instructions=tailor_instructions(cfg),
         stable_context=stable,
-        user_content=_tailor_prompt(posting, prior_critiques),
+        user_content=_tailor_prompt(posting, prior_critiques, notes),
         stage="tailor",
         dry_run_value=cfg.read_base_cv(),
         on_delta=on_delta,
@@ -775,10 +776,16 @@ def tailor_cv(
     verify_claims: bool = True,
     adversarial: bool = True,
     prior_critiques: Sequence[Critique] = (),
+    notes: Sequence[str] = (),
     on_delta: Callable[[str], None] | None = None,
     max_passes: int = 2,
 ) -> TailorResult:
     """Tailor a CV, and re-tailor once if the review finds a blocking problem.
+
+    ``notes`` are the candidate's own notes on the role from the tracker.
+    They are the only channel for a decision the model cannot make on its
+    own, such as which of two titles to lead with, or a sentence the
+    candidate wants said in their own words.
 
     A blocking critique means the CV should not be sent. Writing it anyway and
     printing a red count leaves the fix depending on the reader noticing a
@@ -797,7 +804,7 @@ def tailor_cv(
         result = _tailor_once(
             posting, cfg, claude,
             render=render, verify_claims=verify_claims, adversarial=adversarial,
-            prior_critiques=critiques, on_delta=on_delta,
+            prior_critiques=critiques, notes=notes, on_delta=on_delta,
         )
         result.passes = attempt
         result.prior_addressed = len(critiques)
@@ -850,8 +857,23 @@ def ground_claims(
 
 
 def _tailor_prompt(
-    posting: JobPosting, prior_critiques: Sequence[Critique] = ()
+    posting: JobPosting,
+    prior_critiques: Sequence[Critique] = (),
+    notes: Sequence[str] = (),
 ) -> str:
+    notes_block: list[str] = []
+    if notes:
+        notes_block = [
+            "",
+            "<candidate_notes_for_this_role>",
+            "The candidate wrote these about this specific application. They",
+            "take precedence over the general instructions above where the two",
+            "differ, but never over the sources: a note cannot make a claim",
+            "grounded.",
+            "",
+            *[f"- {n.strip()}" for n in notes if n.strip()],
+            "</candidate_notes_for_this_role>",
+        ]
     critique_block: list[str] = []
     if prior_critiques:
         critique_block = [
@@ -882,6 +904,7 @@ def _tailor_prompt(
             "",
             posting.description or "(no description text available)",
             "</job_posting>",
+            *notes_block,
             *critique_block,
             "",
             "Produce the complete tailored HTML CV now. Output HTML only.",

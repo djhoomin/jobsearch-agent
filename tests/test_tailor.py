@@ -887,3 +887,52 @@ class TestUnchangedQuotes:
                            verify_claims=False, prior_critiques=prior)
         assert result.prior_addressed == 1
         assert result.unchanged == []
+
+
+# --- the candidate's notes are the one channel for a judgement call ---------
+
+
+class TestNotesInPrompt:
+    def _posting(self):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(company="Acme", title="Head of AI", url="", job_id="j")
+
+    def test_notes_reach_the_prompt_after_the_posting(self):
+        from jobsearch.tailor import _tailor_prompt
+
+        prompt = _tailor_prompt(self._posting(), notes=["Lead with the Staff title.", " "])
+        assert "candidate_notes_for_this_role" in prompt
+        assert "- Lead with the Staff title." in prompt
+        assert prompt.index("</job_posting>") < prompt.index("candidate_notes")
+        assert prompt.count("\n- ") == 1, "blank notes are dropped"
+
+    def test_no_notes_means_no_block(self):
+        from jobsearch.tailor import _tailor_prompt
+
+        assert "candidate_notes" not in _tailor_prompt(self._posting())
+
+    def test_notes_cannot_ground_a_claim(self):
+        from jobsearch.tailor import _tailor_prompt
+
+        prompt = _tailor_prompt(self._posting(), notes=["x"])
+        assert "cannot make a claim" in prompt
+
+    def test_tailor_cv_passes_notes_to_every_pass(self, cfg, posting):
+        from jobsearch.tailor import tailor_cv
+
+        claude = _StubClaude(blocking_passes=1)
+        tailor_cv(posting, cfg, claude, render=False, verify_claims=False, notes=["pick one title"])
+        assert all("pick one title" in p for p in claude.prompts)
+        assert len(claude.prompts) == 2
+
+    def test_tui_loads_notes_from_the_tracker(self, cfg):
+        from jobsearch.models import JobPosting
+        from jobsearch.tracker import Tracker
+        from jobsearch.tui import load_notes
+
+        with Tracker.from_config(cfg) as t:
+            jid = t.upsert_job(JobPosting(company="Acme", title="Head of AI", url="https://x.invalid/1"))
+            t.add_note(jid, "first")
+            t.add_note(jid, "second")
+            assert load_notes(t, jid) == ["first", "second"]

@@ -2049,6 +2049,11 @@ def score_many_blocking(
     return f"batch of {total}: " + ", ".join(parts)
 
 
+def load_notes(tracker: Any, job_id: str) -> list[str]:
+    """The candidate's notes on a role, oldest first, for the tailor prompt."""
+    return [str(_get(n, "body", "")) for n in tracker.notes(job_id) if _get(n, "body", "")]
+
+
 def load_critiques(row: Any) -> list[Any]:
     """Prior adversarial findings for a role, so a re-run can address them.
 
@@ -2112,7 +2117,9 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
             from .tailor import tailor_cv
 
             prior = load_critiques(tracker.get_job(job_id))
-            result = tailor_cv(posting, cfg, client, prior_critiques=prior)
+            result = tailor_cv(
+                posting, cfg, client, prior_critiques=prior, notes=load_notes(tracker, job_id)
+            )
             # Verify here rather than leaving it to the `v` key. The CLI path
             # does this, and skipping it stored ats_json = None, so a role page
             # showed no ATS result after a successful tailor and the step read

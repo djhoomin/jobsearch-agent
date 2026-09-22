@@ -253,11 +253,14 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
         posting = tracker.get_posting(job_id)
         print(f"Tailoring for {posting.company} - {posting.title}")
 
-        from .tui import load_critiques
+        from .tui import load_critiques, load_notes
 
         prior = [] if args.fresh else load_critiques(tracker.get_job(job_id))
         if prior:
             print(f"  addressing {len(prior)} finding(s) from the previous version")
+        notes = load_notes(tracker, job_id)
+        if notes:
+            print(f"  using {len(notes)} note(s) you wrote on this role")
 
         on_delta = (lambda text: print(text, end="", flush=True)) if args.stream else None
         result = tailor_cv(
@@ -265,6 +268,7 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
             cfg,
             client,
             prior_critiques=prior,
+            notes=notes,
             render=not args.no_render,
             verify_claims=not args.no_verify_claims,
             on_delta=on_delta,
