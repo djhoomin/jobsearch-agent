@@ -168,6 +168,8 @@ class ConstraintResult:
     verdict: Verdict
     reason: str
     evidence: str = ""
+    #: Set when the verdict stands but the posting text argues against it.
+    advisory: str = ""
 
     @property
     def eliminates(self) -> bool:

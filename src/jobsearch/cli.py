@@ -195,6 +195,8 @@ def cmd_score(cfg: Config, args: argparse.Namespace) -> int:
             print(f"  [{mark}] {result.name}: {result.reason}")
             if result.evidence:
                 print(f"         evidence: {result.evidence}")
+            if result.advisory:
+                print(f"         CHECK: {result.advisory}")
 
         if report.eliminated:
             print()
@@ -725,6 +727,24 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         "ANTHROPIC_API_KEY set" if has_key else ("`ant` CLI found" if has_cli else "set ANTHROPIC_API_KEY or run `ant auth login`"),
     )
 
+    from .systemone import SystemOneSettings
+
+    so = SystemOneSettings.from_config(cfg)
+    if so.enabled:
+        try:
+            import typesafe_sdk  # noqa: F401
+
+            has_sdk = True
+        except ImportError:
+            has_sdk = False
+        check(
+            "System One (Jev) reader",
+            bool(so.api_key) and has_sdk,
+            f"{so.api_key_env} set, typesafe-sdk installed" if (so.api_key and has_sdk)
+            else (f"set {so.api_key_env}" if not so.api_key else "pip install -e '.[systemone]'"),
+        )
+    else:
+        print("  [ok  ] System One (Jev) reader: disabled (constraints use the phrase lists only)")
     print("scoring:")
     check("weights sum to 1.0", True, str(cfg.weights.as_dict()))
     print("boards:")

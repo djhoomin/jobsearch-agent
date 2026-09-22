@@ -69,6 +69,24 @@ cache_ttl = "1h"
 # score    = { effort = "medium" }
 # outreach = { model = "claude-sonnet-5" }
 
+[systemone]
+# Optional: TypeSafe's Jev reads the posting text for the hard constraints.
+# It is a decision model (calibrated yes/no probabilities, no text) that
+# catches refusals the phrase lists miss, such as "authorized to work in the
+# United States without the need for new visa sponsorship". Only posting text
+# is sent, never your documents. Needs `pip install -e '.[systemone]'` and the
+# key in the environment; with either missing, scoring runs exactly as before.
+enabled = false
+api_key_env = "TYPESAFE_API_KEY"
+model = "jev-latest"
+# An UNKNOWN verdict becomes FAIL at or above fail_above, PASS at or below
+# pass_below, and otherwise stays UNKNOWN with the probability noted.
+fail_above = 0.8
+pass_below = 0.2
+# A PASS the code reached by lookup (an IND-listed employer) is kept, but gets
+# a CHECK line when the posting text argues against it at or above flag_above.
+flag_above = 0.7
+
 [candidate]
 name = "Your Name"
 email = "you@example.com"

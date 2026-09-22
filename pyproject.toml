@@ -28,6 +28,7 @@ google = [
 ]
 tui = ["textual>=0.80"]
 openai = ["openai>=1.40"]
+systemone = ["typesafe-sdk>=0.6.0"]
 dev = ["pytest>=8.0", "textual>=0.80", "openai>=1.40"]
 
 [project.scripts]

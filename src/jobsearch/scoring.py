@@ -32,6 +32,7 @@ from .models import (
     ScoreReport,
     Verdict,
 )
+from .systemone import Reader, refine_constraints
 
 DIMENSIONS = ("buyer", "role_fit", "company", "domain", "talent")
 
@@ -462,13 +463,20 @@ def score_posting(
     claude: ClaudeClient,
     *,
     skip_constraints: bool = False,
+    systemone_reader: Reader | None = None,
 ) -> ScoreReport:
     """Score one posting: hard constraints, then (if it survives) the rubric.
 
     A posting eliminated by a hard constraint is not sent to the model at all -
     that is the point of running the filters first.
+
+    When ``[systemone]`` is enabled, Jev reads the posting text after the code
+    has ruled: it resolves UNKNOWN verdicts and flags a PASS the text argues
+    against. It never overturns a FAIL, and a dry run never calls it.
     """
     constraints = ConstraintReport() if skip_constraints else check_constraints(posting, cfg)
+    if not skip_constraints and not getattr(claude, "dry_run", False):
+        refine_constraints(posting, cfg, constraints, reader=systemone_reader)
     report = ScoreReport(job_id=posting.job_id, constraints=constraints)
 
     if not constraints.passed:
