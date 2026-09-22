@@ -2150,10 +2150,13 @@ def run_stage_blocking(cfg: Config, stage: str, job_id: str, *, dry_run: bool = 
                 f"  [dim]re-tailored once to clear a blocking critique[/]"
                 if passes > 1 else ""
             )
-            addressed = (
-                f"  [dim]addressed {result.prior_addressed} prior finding(s)[/]"
-                if getattr(result, "prior_addressed", 0) else ""
-            )
+            addressed = ""
+            fed = getattr(result, "prior_addressed", 0)
+            if fed:
+                stayed = len(getattr(result, "unchanged", []))
+                addressed = f"  [dim]{fed - stayed} of {fed} prior finding(s) rewritten[/]"
+                if stayed:
+                    addressed += f"  [yellow]{stayed} quote(s) unchanged[/]"
             addressed += retried
             name = Path(str(result.pdf_path or result.html_path)).name
             pages = f"  {result.pages}pp" if result.pages else ""

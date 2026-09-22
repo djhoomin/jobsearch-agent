@@ -298,6 +298,10 @@ class TailorResult:
     passes: int = 1
     #: How many prior critiques were fed into the final pass.
     prior_addressed: int = 0
+    #: Prior critiques whose quoted text still appears, unchanged, in the
+    #: final CV. "Fed into the prompt" and "acted on" are different claims;
+    #: this is the cheap, deterministic half of the second one.
+    unchanged: list[Critique] = field(default_factory=list)
 
     @property
     def blocking(self) -> list[Critique]:  # noqa: D401

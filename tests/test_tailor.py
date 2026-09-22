@@ -823,3 +823,67 @@ def test_harden_html_applies_the_trim():
     out, notes = harden_html(html)
     assert "entirely my own commits" not in out
     assert any("role line" in n for n in notes)
+
+
+# --- fed into the prompt is not the same as acted on -------------------------
+
+
+class TestUnchangedQuotes:
+    """A prior finding whose quoted sentence is still in the CV was not addressed."""
+
+    def _c(self, quote, severity="major"):
+        from jobsearch.models import Critique
+
+        return Critique(issue="i", severity=severity, quote=quote)
+
+    def test_verbatim_survivor_is_reported(self):
+        from jobsearch.tailor import unchanged_quotes
+
+        html = "<p>Led a team that beat a frontier model on latency.</p>"
+        found = unchanged_quotes(html, [self._c("beat a frontier model on latency")])
+        assert len(found) == 1
+
+    def test_rewritten_text_counts_as_addressed(self):
+        from jobsearch.tailor import unchanged_quotes
+
+        html = "<p>Matched GPT-4o quality at 30% of the latency on our benchmark.</p>"
+        assert unchanged_quotes(html, [self._c("beat a frontier model on latency")]) == []
+
+    def test_case_whitespace_and_typography_do_not_count_as_a_rewrite(self):
+        from jobsearch.tailor import unchanged_quotes
+
+        html = "<li>Grew the Southern&nbsp;Europe team by 50%\n   — the “big” one</li>"
+        quote = "grew the southern europe team by 50% - the \"big\" one"
+        assert len(unchanged_quotes(html, [self._c(quote)])) == 1
+
+    def test_short_or_empty_quotes_are_ignored(self):
+        from jobsearch.tailor import unchanged_quotes
+
+        html = "<p>Head of AI at Acme</p>"
+        assert unchanged_quotes(html, [self._c(""), self._c("Head of AI")]) == []
+
+    def test_tailor_result_carries_the_survivors(self, cfg, posting):
+        from jobsearch.models import Critique
+        from jobsearch.tailor import tailor_cv
+
+        class _Sticky(_StubClaude):
+            def stream_text(self, *, user_content="", **kw):
+                self.calls += 1
+                self.prompts.append(user_content)
+                return "<html><body><h2>Professional Experience</h2><p>Six years of AI leadership.</p></body></html>"
+
+        prior = [Critique(issue="Six years is really four", severity="major", quote="Six years of AI leadership")]
+        result = tailor_cv(posting, cfg, _Sticky(blocking_passes=0), render=False,
+                           verify_claims=False, prior_critiques=prior)
+        assert result.prior_addressed == 1
+        assert [c.quote for c in result.unchanged] == ["Six years of AI leadership"]
+
+    def test_a_real_rewrite_clears_the_list(self, cfg, posting):
+        from jobsearch.models import Critique
+        from jobsearch.tailor import tailor_cv
+
+        prior = [Critique(issue="x", severity="major", quote="Six years of AI leadership")]
+        result = tailor_cv(posting, cfg, _StubClaude(blocking_passes=0), render=False,
+                           verify_claims=False, prior_critiques=prior)
+        assert result.prior_addressed == 1
+        assert result.unchanged == []

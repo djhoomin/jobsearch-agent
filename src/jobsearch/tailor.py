@@ -23,6 +23,7 @@ asked to "tailor" will happily reach for a plausible one.
 from __future__ import annotations
 
 import logging
+import html as _entities
 import re
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -453,6 +454,35 @@ def html_to_text(html: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _comparable(text: str) -> str:
+    """Text as a quote check should see it: case, whitespace and the
+    quote/dash variants the model is free to change do not count."""
+    text = _entities.unescape(html_to_text(text)).lower()
+    text = re.sub(r"[\u2018\u2019\u201a\u2032]", "'", text)
+    text = re.sub(r"[\u201c\u201d\u201e\u2033]", '"', text)
+    text = re.sub(r"[\u2010-\u2015\u2212]", "-", text)
+    text = re.sub(r"\s*-\s*", "-", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def unchanged_quotes(html: str, critiques: Sequence[Critique]) -> list[Critique]:
+    """The critiques whose quoted text still appears verbatim in ``html``.
+
+    Feeding a finding into the prompt and acting on it are different things,
+    and only the second one matters. This cannot tell whether a rewrite
+    actually answered the objection, but it can tell when the criticised
+    sentence is still sitting there word for word, which is the case a reader
+    would otherwise only catch by opening both files.
+    """
+    text = _comparable(html)
+    survivors: list[Critique] = []
+    for c in critiques:
+        quote = _comparable(c.quote)
+        if len(quote) >= 12 and quote in text:
+            survivors.append(c)
+    return survivors
+
+
 def extract_headline(html: str) -> str:
     match = re.search(r'class="subtitle"[^>]*>(.*?)</div>', html, re.IGNORECASE | re.DOTALL)
     return html_to_text(match.group(1)) if match else ""
@@ -724,6 +754,10 @@ def _tailor_once(
         log.info("[dry-run] would render %s", pdf_path)
         result.pdf_path = str(pdf_path)
 
+    result.unchanged = unchanged_quotes(html, prior_critiques)
+    for c in result.unchanged:
+        log.warning("prior finding left unchanged [%s]: %s", c.severity, c.quote[:80])
+
     if verify_claims:
         result.claims = ground_claims(html, posting, cfg, claude)
     if adversarial and not claude.dry_run:
@@ -882,6 +916,7 @@ __all__ = [
     "extract_headline",
     "format_claim_report",
     "ground_claims",
+    "unchanged_quotes",
     "harden_html",
     "html_to_text",
     "output_stem",

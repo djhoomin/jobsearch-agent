@@ -309,6 +309,16 @@ def cmd_tailor(cfg: Config, args: argparse.Namespace) -> int:
                     print(f"        \"{c.quote[:100]}\"")
                 if c.fix:
                     print(f"        fix: {c.fix}")
+        if result.prior_addressed:
+            # Counted against what the final pass was actually shown: on a
+            # re-tailor that is the prior findings plus the first pass's own.
+            fed, stayed = result.prior_addressed, result.unchanged
+            print(
+                f"\n  prior findings: {fed - len(stayed)} of {fed} "
+                f"rewritten, {len(stayed)} quote(s) unchanged"
+            )
+            for c in stayed:
+                print(f"    [{c.severity}] still says: \"{c.quote[:100]}\"")
         if result.ungrounded:
             print()
             print("Review the ungrounded claims above before sending this CV.")
