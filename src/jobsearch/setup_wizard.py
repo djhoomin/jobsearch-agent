@@ -227,6 +227,7 @@ def render_config(template: str, answers: dict[str, str]) -> str:
         "email": _toml_str(answers["email"]),
         "location": _toml_str(answers["location"]),
         "linkedin": _toml_str(answers["linkedin"]),
+        "website": _toml_str(answers.get("website", "")),
         "current_title": _toml_str(answers["current_title"]),
         "current_company": _toml_str(answers["current_company"]),
         "comp_floor_eur": answers["comp_floor_eur"],
@@ -294,6 +295,7 @@ def run_setup(
     answers["email"] = ask("email", "", reader=reader)
     answers["location"] = ask("where you are based", "", reader=reader)
     answers["linkedin"] = ask("LinkedIn URL", "", reader=reader)
+    answers["website"] = ask("portfolio site URL (optional)", "", reader=reader)
     answers["current_title"] = ask("current title", "", reader=reader)
     answers["current_company"] = ask("current employer", "", reader=reader)
     answers["user_agent"] = (

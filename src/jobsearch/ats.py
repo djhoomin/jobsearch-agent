@@ -373,6 +373,33 @@ LIGATURES = {
 }
 
 
+def check_contact(text: str, values: Sequence[str]) -> Check:
+    """Every contact value (website, email) must survive text extraction.
+
+    A portfolio URL that renders in the PDF but does not extract is invisible
+    to the recruiter's parser, which is where a URL gets clicked from. Warn,
+    do not fail: the CV is still a CV without it.
+    """
+    wanted = [v for v in values if v]
+    if not wanted:
+        return Check("contact", "pass", "no contact values configured")
+    flat = _norm(text)
+    # A bare domain must stand on its own: "example.net" inside
+    # "dj@example.net" is the email, not the website line.
+    missing = [
+        v for v in wanted
+        if not re.search(r"(?<![\w@.\-/])" + re.escape(_norm(v)) + r"(?![\w\-])", flat)
+    ]
+    if missing:
+        return Check(
+            "contact",
+            "warn",
+            f"{len(missing)} contact value(s) missing from the extracted text",
+            details=[f"missing: {v}" for v in missing],
+        )
+    return Check("contact", "pass", f"all {len(wanted)} contact values extract")
+
+
 def check_ligatures(text: str) -> Check:
     """Ligatures are one character in the text layer, not two letters.
 
@@ -533,6 +560,7 @@ def verify_pdf(
     nowrap_keywords: Sequence[str] = (),
     jd_text: str = "",
     min_keyword_coverage: float = 0.0,
+    contact_values: Sequence[str] = (),
 ) -> ATSReport:
     """Run every ATS assertion against a rendered PDF."""
     text, page_count = extract_text(pdf_path)
@@ -548,6 +576,8 @@ def verify_pdf(
         check_hyphen_wraps(text, nowrap_keywords),
         check_ligatures(text),
     ]
+    if contact_values:
+        report.checks.append(check_contact(text, contact_values))
 
     if not text.strip():
         report.checks.insert(
@@ -590,13 +620,23 @@ def verify_from_config(cfg, pdf_path: str | Path, jd_text: str = "") -> ATSRepor
         nowrap_keywords=ats.get("nowrap_keywords", []),
         jd_text=jd_text,
         min_keyword_coverage=float(ats.get("min_keyword_coverage", 0.0)),
+        contact_values=_contact_values(cfg),
     )
+
+
+def _contact_values(cfg) -> list[str]:
+    """Website (without scheme) and email from ``[candidate]``."""
+    website = (cfg.get("candidate", "website", "") or "").strip()
+    website = re.sub(r"^https?://", "", website).rstrip("/")
+    email = (cfg.get("candidate", "email", "") or "").strip()
+    return [v for v in (website, email) if v]
 
 
 __all__ = [
     "ATSReport",
     "Check",
     "KeywordCoverage",
+    "check_contact",
     "extract_jd_terms",
     "extract_text",
     "keyword_coverage",

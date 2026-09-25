@@ -152,9 +152,9 @@ class TestRunSetup:
         return repo
 
     def _answers(self) -> list[str]:
-        # 5 documents, 6 candidate fields, comp floor, waiver y/n, chrome, boards y/n
+        # 5 documents, 7 candidate fields, comp floor, waiver y/n, chrome, boards y/n
         return ["", "", "", "", "", "Jane Q. Testcandidate", "jane@example.com",
-                "Testville", "https://linkedin.test/jane", "Director of Engineering",
+                "Testville", "https://linkedin.test/jane", "", "Director of Engineering",
                 "Northwind Labs", "175000", "y", "/usr/bin/chromium", "n"]
 
     def test_it_writes_a_loadable_config(self, tmp_path, capsys):

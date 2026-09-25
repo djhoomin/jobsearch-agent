@@ -936,3 +936,61 @@ class TestNotesInPrompt:
             t.add_note(jid, "first")
             t.add_note(jid, "second")
             assert load_notes(t, jid) == ["first", "second"]
+
+
+# --- contact lines survive tailoring --------------------------------------
+
+from jobsearch.tailor import ensure_contact_lines  # noqa: E402
+
+
+_CONTACT_HTML = """<div class="head">
+  <div class="contact">
+    Email: dj@example.net<br>
+    Phone: +31 6 00000000<br>
+    LinkedIn: linkedin.com/in/someone<br>
+    Location: Amsterdam, Netherlands<br>
+    Work authorization: Netherlands
+  </div>
+</div>"""
+
+
+def test_ensure_contact_lines_restores_dropped_website_before_location():
+    html, notes = ensure_contact_lines(
+        _CONTACT_HTML, [("Website", "example.net"), ("Email", "dj@example.net")]
+    )
+    assert notes == ["contact: restored missing line Website: example.net"]
+    block = html.split('<div class="contact">')[1].split("</div>")[0]
+    lines = [ln.strip() for ln in block.strip().splitlines()]
+    assert "Website: example.net<br>" in lines
+    assert lines.index("Website: example.net<br>") < lines.index(
+        "Location: Amsterdam, Netherlands<br>"
+    )
+
+
+def test_ensure_contact_lines_leaves_present_values_alone():
+    present = _CONTACT_HTML.replace(
+        "LinkedIn:", "Website: example.net<br>\n    LinkedIn:"
+    )
+    html, notes = ensure_contact_lines(present, [("Website", "example.net")])
+    assert notes == []
+    assert html == present
+    assert html.count("Website: example.net") == 1
+
+
+def test_ensure_contact_lines_appends_when_no_location_line():
+    no_loc = _CONTACT_HTML.replace("    Location: Amsterdam, Netherlands<br>\n", "")
+    html, notes = ensure_contact_lines(no_loc, [("Website", "example.net")])
+    assert len(notes) == 1
+    assert "Website: example.net<br>" in html
+    assert html.index("Website: example.net") > html.index("Work authorization")
+
+
+def test_ensure_contact_lines_without_block_reports_and_keeps_html():
+    html, notes = ensure_contact_lines("<h1>x</h1>", [("Website", "example.net")])
+    assert html == "<h1>x</h1>"
+    assert notes and "no .contact block" in notes[0]
+
+
+def test_ensure_contact_lines_no_values_is_a_no_op():
+    html, notes = ensure_contact_lines(_CONTACT_HTML, [("Website", "")])
+    assert (html, notes) == (_CONTACT_HTML, [])

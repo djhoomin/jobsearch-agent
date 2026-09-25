@@ -63,7 +63,9 @@ cp config.example.toml config.local.toml
 ```
 
 Then edit `config.local.toml`: point `[paths]` at your own documents, set
-`[candidate]`, and set your own hard constraints. `config.local.toml` is
+`[candidate]` (including `website`, which every tailored CV keeps in its
+contact block and the ATS verifier checks in the PDF text), and set your own
+hard constraints. `config.local.toml` is
 gitignored — it holds personal details (compensation floor, notice-period
 and non-compete status) that should never reach a remote. The committed
 `config.example.toml` is a placeholder template and is never loaded

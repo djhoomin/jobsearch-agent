@@ -367,3 +367,25 @@ def test_the_css_guard_is_not_duplicated():
     out, notes = harden_html(html)
     assert out.count("font-variant-ligatures") == 1
     assert not any("no_ligatures" in n for n in notes)
+
+
+# --- contact values must extract -------------------------------------------
+
+from jobsearch.ats import check_contact  # noqa: E402
+
+
+def test_check_contact_passes_when_every_value_extracts():
+    text = "Dirk Human\nEmail: dj@example.net\nWebsite: example.net\nLinkedIn: x"
+    check = check_contact(text, ["example.net", "dj@example.net"])
+    assert check.status == "pass"
+
+
+def test_check_contact_warns_and_names_the_missing_value():
+    text = "Dirk Human\nEmail: dj@example.net\nLinkedIn: x"
+    check = check_contact(text, ["example.net", "dj@example.net"])
+    assert check.status == "warn"
+    assert check.details == ["missing: example.net"]
+
+
+def test_check_contact_with_nothing_configured_passes():
+    assert check_contact("anything", []).status == "pass"

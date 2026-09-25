@@ -140,6 +140,8 @@ review of this CV.
    hyphenated or multi-word term the ATS will scan for literally in
    `<span class="nb">...</span>`.
 7. Keep Education and Patents/Publications intact.
+8. Keep the `.contact` block exactly as in the base CV: every line, including
+   the website. It is the only place a reader finds the portfolio.
 
 ## ATS constraints on the HTML you emit
 
@@ -399,6 +401,46 @@ def trim_role_lines(html: str) -> tuple[str, list[str]]:
     # span in the shipped template, div in older ones. Matching only one is how
     # the first version of this passed its tests and did nothing to a real CV.
     html = re.sub(r'<(span|div) class="role"[^>]*>(.*?)</\1>', _trim, html, flags=re.DOTALL)
+    return html, notes
+
+
+_CONTACT_BLOCK = re.compile(r'(<div class="contact">)(.*?)(</div>)', re.S)
+
+
+def ensure_contact_lines(html: str, lines: Sequence[tuple[str, str]]) -> tuple[str, list[str]]:
+    """Put back any contact line the model dropped from the ``.contact`` block.
+
+    ``lines`` is ``[(label, value), ...]`` such as ``("Website", "djhuman.net")``.
+    A line counts as present when its value appears anywhere in the block, so a
+    reformatted line is left alone. Missing lines are inserted before the
+    ``Location:`` line when there is one, otherwise at the end of the block.
+    Returns the HTML and one note per insertion. Without a ``.contact`` block
+    the HTML comes back untouched, with a note saying so.
+    """
+    notes: list[str] = []
+    m = _CONTACT_BLOCK.search(html)
+    wanted = [(label, value) for label, value in lines if value]
+    if not wanted:
+        return html, notes
+    if not m:
+        notes.append("contact: no .contact block found; could not verify contact lines")
+        return html, notes
+    body = m.group(2)
+    for label, value in wanted:
+        # Standalone match: "example.net" inside "dj@example.net" is the
+        # email line, not the website line.
+        if re.search(r"(?<![\w@.\-/])" + re.escape(value) + r"(?![\w\-])", body):
+            continue
+        line = f"{label}: {value}<br>"
+        loc = re.search(r"^([ \t]*)Location:", body, re.M)
+        if loc:
+            indent = loc.group(1)
+            body = body[: loc.start()] + f"{indent}{line}\n" + body[loc.start():]
+        else:
+            body = body.rstrip() + f"<br>\n    {line}\n  "
+        notes.append(f"contact: restored missing line {label}: {value}")
+    if notes:
+        html = html[: m.start(2)] + body + html[m.end(2):]
     return html, notes
 
 
@@ -669,6 +711,13 @@ def tailor_instructions(cfg: Config) -> str:
     )
 
 
+def _contact_lines(cfg) -> list[tuple[str, str]]:
+    """Contact lines every tailored CV must keep, from ``[candidate]``."""
+    website = (cfg.get("candidate", "website", "") or "").strip()
+    display = re.sub(r"^https?://", "", website).rstrip("/")
+    return [("Website", display), ("Email", (cfg.get("candidate", "email", "") or "").strip())]
+
+
 def _tailor_once(
     posting: JobPosting,
     cfg: Config,
@@ -720,6 +769,9 @@ def _tailor_once(
         )
     html, notes = harden_html(html, cfg.get("ats", "nowrap_keywords", []) or [])
     for note in notes:
+        log.warning("%s", note)
+    html, contact_notes = ensure_contact_lines(html, _contact_lines(cfg))
+    for note in contact_notes:
         log.warning("%s", note)
 
     if claude.dry_run:
@@ -940,6 +992,7 @@ __all__ = [
     "format_claim_report",
     "ground_claims",
     "unchanged_quotes",
+    "ensure_contact_lines",
     "harden_html",
     "html_to_text",
     "output_stem",

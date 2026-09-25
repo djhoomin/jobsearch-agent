@@ -94,6 +94,9 @@ name = "Your Name"
 email = "you@example.com"
 location = "Your City, Country"
 linkedin = "https://www.linkedin.com/in/your-handle/"
+# Portfolio site. Kept in the CV contact block on every tailored CV and
+# checked in the rendered PDF's text layer.
+website = "https://example.com"
 current_title = "Your Current Title"
 current_company = "Your Current Employer"
 
