@@ -335,11 +335,23 @@ your own. Verify every token against its live API with `jobsearch doctor
 --boards` — firms migrate between ATS vendors, and a stale token 404s
 silently rather than erroring.
 
-For a role on a site this tool will not scrape, enter it by hand:
+For a single role you found elsewhere, give it the URL. It reads Greenhouse,
+Lever and Ashby through their APIs and any other careers page through its
+schema.org `JobPosting` block (robots.txt permitting), records every location
+the page lists (including the separate `multi_location` list on Phenom-hosted
+sites, where the structured block names only the first site), and drops
+tracking parameters so the role keeps one job id:
+
+```bash
+jobsearch add --url "https://careers.example.com/job/123/Head-of-AI?utm_source=linkedin"
+```
+
+Flags override what the page says. For a site the tool will not read, enter
+the role by hand:
 
 ```bash
 jobsearch add --company Northwind --title "Director of Engineering, AI" \
-  --location Munich --url https://... --file jd.txt
+  --location "Munich, Germany; Amsterdam, Netherlands" --url https://... --file jd.txt
 ```
 
 **Politeness.** A real User-Agent with a contact address, a configurable
