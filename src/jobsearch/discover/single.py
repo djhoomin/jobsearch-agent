@@ -274,7 +274,11 @@ def _ld_salary(ld: dict) -> str:
     return ""
 
 
-_TRACKING_PARAMS = re.compile(r"^(utm_\w+|src|source|ref|gh_src|lever-source|trk|fbclid|gclid)$", re.I)
+# utm_* and ad-click ids, plus the p_sid / p_uid / ss tags Radancy-hosted
+# careers sites (careers.netapp.com) append to paid job-ad traffic.
+_TRACKING_PARAMS = re.compile(
+    r"^(utm_\w+|src|source|ref|gh_src|lever-source|trk|fbclid|gclid|p_sid|p_uid|ss)$", re.I
+)
 
 
 def clean_posting_url(url: str) -> str:

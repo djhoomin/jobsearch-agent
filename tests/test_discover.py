@@ -494,3 +494,11 @@ class TestCleanPostingUrl:
     def test_keeps_meaningful_parameters(self):
         url = "https://boards.greenhouse.io/acme/jobs/1?gh_jid=1&utm_source=x"
         assert clean_posting_url(url) == "https://boards.greenhouse.io/acme/jobs/1?gh_jid=1"
+
+
+def test_clean_posting_url_drops_radancy_ad_tags():
+    url = (
+        "https://careers.netapp.com/job/-/-/27600/101042238944?p_sid=LDGMTob"
+        "&p_uid=Cb5anSsSog&ss=paid&utm_campaign=sales_emea&utm_source=RD_Programmatic"
+    )
+    assert clean_posting_url(url) == "https://careers.netapp.com/job/-/-/27600/101042238944"
