@@ -134,6 +134,48 @@ class TestCalls:
                 instructions="i", stable_context=[], user_content="u", schema={}
             )
 
+    def test_a_truncated_structured_answer_names_the_limit(self, monkeypatch):
+        # Seen 2026-09-26: the claim check spent 15,999 of 16,000 tokens reasoning and
+        # returned nothing, which used to surface as "endpoint returned no content".
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=""), finish_reason="length")],
+            usage=SimpleNamespace(
+                prompt_tokens=9000, completion_tokens=16000,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=15999),
+            ),
+        )
+        client = self._client(monkeypatch, response)
+        with pytest.raises(ClaudeError, match=r"output limit of 32000 tokens.*15999 of 16000.*max_tokens"):
+            client.structured(
+                instructions="i", stable_context=[], user_content="u", schema={}, stage="ground"
+            )
+
+    def test_half_a_json_object_at_the_limit_is_truncation_not_bad_json(self, monkeypatch):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"claims": [{"text": "x"'),
+                                     finish_reason="length")],
+            usage=None,
+        )
+        client = self._client(monkeypatch, response)
+        with pytest.raises(ClaudeError, match="output limit"):
+            client.structured(
+                instructions="i", stable_context=[], user_content="u", schema={}, max_tokens=500
+            )
+
+    def test_a_truncated_stream_names_the_streaming_limit(self, monkeypatch):
+        events = [
+            SimpleNamespace(usage=None, choices=[SimpleNamespace(
+                delta=SimpleNamespace(content="<html>half"), finish_reason=None)]),
+            SimpleNamespace(usage=None, choices=[SimpleNamespace(
+                delta=SimpleNamespace(content=""), finish_reason="length")]),
+        ]
+        client = self._client(monkeypatch, iter(events))
+        with pytest.raises(ClaudeError, match="streaming_max_tokens"):
+            client.stream_text(instructions="i", stable_context=[], user_content="u")
+
+    def test_the_default_output_limit_leaves_room_to_reason(self):
+        assert OpenAICompatibleClient(model="m", base_url="http://local").max_tokens == 32000
+
     def test_missing_openai_package_explains_the_extra(self, monkeypatch):
         import builtins
 

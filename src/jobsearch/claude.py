@@ -62,7 +62,7 @@ class ClaudeClient:
     """Wrapper carrying the stable cached prefix for this job search."""
 
     model: str = MODEL
-    max_tokens: int = 16000
+    max_tokens: int = 32000  # adaptive thinking counts against it; see openai_compat
     streaming_max_tokens: int = 64000
     effort: str = "high"
     cache_ttl: str = "1h"
@@ -96,7 +96,7 @@ class ClaudeClient:
         section = cfg.section("claude")
         return cls(
             model=section.get("model", MODEL),
-            max_tokens=int(section.get("max_tokens", 16000)),
+            max_tokens=int(section.get("max_tokens", 32000)),
             streaming_max_tokens=int(section.get("streaming_max_tokens", 64000)),
             effort=section.get("effort", "high"),
             cache_ttl=section.get("cache_ttl", "1h"),
@@ -181,6 +181,11 @@ class ClaudeClient:
             ),
         )
         self._record_usage(response)
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            raise ClaudeError(
+                f"{stage}: stopped at the output limit of {max_tokens or self.max_tokens} tokens "
+                "before finishing; raise [claude].max_tokens"
+            )
         text = next((b.text for b in response.content if b.type == "text"), "")
         if not text.strip():
             raise ClaudeError(f"{stage}: model returned no text block")

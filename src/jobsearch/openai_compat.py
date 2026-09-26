@@ -138,7 +138,10 @@ class OpenAICompatibleClient:
     model: str
     base_url: str
     api_key_env: str = "OPENAI_API_KEY"
-    max_tokens: int = 16000
+    #: Reasoning models spend most of their output allowance thinking. At 16000 the
+    #: structured claim check ran out before answering in 4 of 6 runs on DeepSeek v4.1
+    #: Flash and GLM-5.3 FlashX (2026-09-26); at 32000, 3 of 3 finished.
+    max_tokens: int = 32000
     streaming_max_tokens: int = 64000
     temperature: float | None = None
     cache_ttl: str = "1h"
@@ -197,7 +200,7 @@ class OpenAICompatibleClient:
             model=section.get("model", ""),
             base_url=normalise_base_url(str(base_url)),
             api_key_env=section.get("api_key_env", "OPENAI_API_KEY"),
-            max_tokens=int(section.get("max_tokens", 16000)),
+            max_tokens=int(section.get("max_tokens", 32000)),
             streaming_max_tokens=int(section.get("streaming_max_tokens", 64000)),
             temperature=section.get("temperature"),
             cache_ttl=section.get("cache_ttl", "1h"),
@@ -320,6 +323,8 @@ class OpenAICompatibleClient:
             },
         )
         self._record_usage(response)
+        finish = getattr(response.choices[0], "finish_reason", None) if response.choices else None
+        self._raise_if_truncated(stage, finish, max_tokens or self.max_tokens, "max_tokens")
         text = (response.choices[0].message.content or "") if response.choices else ""
         if not text.strip():
             raise ClaudeError(f"{stage}: endpoint returned no content")
@@ -350,19 +355,42 @@ class OpenAICompatibleClient:
             stream_options={"include_usage": True},
         )
         chunks: list[str] = []
+        finish = None
         for event in stream:
             if getattr(event, "usage", None):
                 self._record_usage(event)
             for choice in getattr(event, "choices", None) or []:
+                finish = getattr(choice, "finish_reason", None) or finish
                 piece = getattr(choice.delta, "content", None)
                 if piece:
                     chunks.append(piece)
                     if on_delta:
                         on_delta(piece)
+        self._raise_if_truncated(stage, finish, max_tokens or self.streaming_max_tokens,
+                                 "streaming_max_tokens")
         text = "".join(chunks)
         if not text.strip():
             raise ClaudeError(f"{stage}: endpoint returned no content")
         return text
+
+    # -- truncation ----------------------------------------------------------
+    def _raise_if_truncated(self, stage: str, finish_reason: Any, limit: int, setting: str) -> None:
+        """A response cut off at the token limit is a failure, however it looks.
+
+        A truncated structured answer is either empty or half a JSON object, and
+        neither says why. Reasoning models make this common: the thinking counts
+        against the same limit, so a call can spend it all before writing a word.
+        """
+        if finish_reason != "length":
+            return
+        usage = self._last_usage
+        out = usage.output_tokens
+        reasoning = getattr(self, "_last_reasoning_tokens", 0)
+        spent = f" ({reasoning} of {out} output tokens were reasoning)" if reasoning else ""
+        raise ClaudeError(
+            f"{stage}: stopped at the output limit of {limit} tokens before finishing{spent}; "
+            f"raise [claude].{setting} or use a model that reasons less"
+        )
 
     # -- bookkeeping -------------------------------------------------------
     def _record_usage(self, response: Any) -> None:
@@ -370,6 +398,8 @@ class OpenAICompatibleClient:
         if usage is None:
             return
         cached = written = 0
+        out_details = getattr(usage, "completion_tokens_details", None)
+        self._last_reasoning_tokens = int(getattr(out_details, "reasoning_tokens", 0) or 0)
         details = getattr(usage, "prompt_tokens_details", None)
         if details is not None:
             cached = int(getattr(details, "cached_tokens", 0) or 0)

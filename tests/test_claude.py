@@ -51,3 +51,25 @@ class TestStageOverrides:
         cfg.raw.setdefault("claude", {})["stages"] = {"ground": "sonnet"}
         client = ClaudeClient.from_config(cfg, dry_run=True)
         assert client.model_for("ground") == client.model
+
+
+class TestTruncation:
+    """A structured answer cut off at max_tokens is half a JSON object; say so."""
+
+    def test_a_structured_call_at_the_limit_names_the_limit(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import pytest
+
+        from jobsearch.claude import ClaudeClient, ClaudeError
+
+        response = SimpleNamespace(
+            stop_reason="max_tokens",
+            content=[SimpleNamespace(type="text", text='{"claims": [')],
+            usage=None,
+        )
+        fake = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: response))
+        client = ClaudeClient(model="claude-opus-5")
+        monkeypatch.setattr(type(client), "client", property(lambda self: fake))
+        with pytest.raises(ClaudeError, match="output limit of 32000 tokens"):
+            client.structured(instructions="i", stable_context=[], user_content="u", schema={})
