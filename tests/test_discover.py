@@ -409,3 +409,88 @@ class TestTitleRequireAny:
     def test_include_is_still_required(self):
         """The gate narrows; it does not admit titles the include list rejects."""
         assert not self._match("Data Analyst")
+
+
+# --- careers pages: schema.org JobPosting and multi-location ----------------
+
+from jobsearch.discover.single import clean_posting_url, posting_from_page  # noqa: E402
+
+_LD = """<script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting",
+"title":"Vice President, AI Enablement","datePosted":"2026-09-25",
+"hiringOrganization":{"@type":"Organization","name":"Genmab"},
+"description":"&lt;p&gt;Lead the &lt;b&gt;AI Center of Excellence&lt;/b&gt;.&lt;/p&gt;",
+"jobLocation":{"@type":"Place","address":{"addressLocality":"Princeton",
+"addressRegion":"New Jersey","addressCountry":"United States of America"}}}</script>"""
+
+# Trimmed from a Phenom page: the structured block names one site, the
+# multi_location array names all three.
+_PHENOM = """<script>var phApp = {"ddo":{"jobDetail":{"data":{"job":{
+"standardised_multi_location":[{"standardisedCity":"Princeton"}],
+"multi_location":[
+ {"country":"United States of America","cityState":"Princeton, New Jersey","city":"Princeton"},
+ {"country":"Denmark","cityState":"Copenhagen","city":"Copenhagen"},
+ {"country":"Netherlands","cityState":"Utrecht","city":"Utrecht",
+  "address":"Uppsalalaan 15, 3584CT Utrecht, Netherlands"}]}}}}};</script>"""
+
+
+class TestCareersPage:
+    URL = "https://careers.genmab.com/global/en/job/X/Vice-President-AI-Enablement"
+
+    def test_reads_title_company_and_description_from_json_ld(self):
+        p = posting_from_page(self.URL, _LD)
+        assert p.company == "Genmab"
+        assert p.title == "Vice President, AI Enablement"
+        assert "AI Center of Excellence" in p.description
+        assert "<b>" not in p.description
+
+    def test_json_ld_alone_gives_its_one_location(self):
+        p = posting_from_page(self.URL, _LD)
+        assert p.location == "Princeton, New Jersey, United States of America"
+
+    def test_phenom_multi_location_adds_every_site_once(self):
+        p = posting_from_page(self.URL, _LD + _PHENOM)
+        assert p.location.split("; ") == [
+            "Princeton, New Jersey, United States of America",
+            "Copenhagen, Denmark",
+            "Utrecht, Netherlands",
+        ]
+
+    def test_a_european_site_rescues_the_location_constraint(self, cfg):
+        from jobsearch.scoring import check_location
+        from jobsearch.models import Verdict
+
+        p = posting_from_page(self.URL, _LD + _PHENOM)
+        assert check_location(p, cfg).verdict == Verdict.PASS
+
+    def test_json_ld_list_and_graph_forms_are_found(self):
+        wrapped = _LD.replace(
+            '{"@context":"https://schema.org","@type":"JobPosting",',
+            '{"@graph":[{"@type":"WebPage"},{"@type":"JobPosting",',
+        ).replace("}}}</script>", "}}}]}</script>")
+        assert posting_from_page(self.URL, wrapped).title == "Vice President, AI Enablement"
+
+    def test_without_json_ld_falls_back_to_title_and_host(self):
+        p = posting_from_page(self.URL, "<title>Head of AI</title><p>Text</p>" + _PHENOM)
+        assert p.title == "Head of AI"
+        assert p.company == "Genmab"
+        assert "Utrecht, Netherlands" in p.location
+
+    def test_salary_from_base_salary(self):
+        body = _LD.replace(
+            '"jobLocation"',
+            '"baseSalary":{"currency":"EUR","value":{"minValue":150000,"maxValue":180000,"unitText":"YEAR"}},"jobLocation"',
+        )
+        assert posting_from_page(self.URL, body).salary_text == "EUR 150,000 - 180,000 year"
+
+
+class TestCleanPostingUrl:
+    def test_drops_tracking_parameters(self):
+        url = (
+            "https://careers.genmab.com/global/en/job/X/VP?utm_source=linkedin"
+            "&utm_medium=phenom-feeds&src=LinkedIn"
+        )
+        assert clean_posting_url(url) == "https://careers.genmab.com/global/en/job/X/VP"
+
+    def test_keeps_meaningful_parameters(self):
+        url = "https://boards.greenhouse.io/acme/jobs/1?gh_jid=1&utm_source=x"
+        assert clean_posting_url(url) == "https://boards.greenhouse.io/acme/jobs/1?gh_jid=1"

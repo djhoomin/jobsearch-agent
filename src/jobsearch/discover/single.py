@@ -8,6 +8,7 @@ and it refuses outright for hosts whose terms forbid automated access.
 
 from __future__ import annotations
 
+import json
 import re
 import urllib.parse
 
@@ -126,17 +127,165 @@ def _from_ashby(url: str, fetcher: Fetcher, cfg: Config | None) -> JobPosting:
 
 
 def _from_page(url: str, fetcher: Fetcher) -> JobPosting:
-    """Last resort: read the company's own careers page, robots permitting."""
+    """Last resort: read the company's own careers page, robots permitting.
+
+    Prefers the page's schema.org ``JobPosting`` block, which most career sites
+    embed for search engines, over the rendered text. Locations come from every
+    source on the page, because the structured block often names only the
+    first site of a multi-location role: Phenom-hosted careers sites (Genmab,
+    for one) list the rest in a separate ``multi_location`` array, and a
+    Utrecht role recorded as "Princeton" fails the location constraint.
+    """
     body = fetcher.get(url)
+    return posting_from_page(url, body)
+
+
+def posting_from_page(url: str, body: str) -> JobPosting:
+    """Build a :class:`JobPosting` from a fetched careers page. Pure, no I/O."""
+    ld = _ld_job_posting(body)
+    locations = _dedupe_locations(
+        [*(_ld_locations(ld) if ld else []), *_phenom_locations(body)]
+    )
+    if ld:
+        org = ld.get("hiringOrganization")
+        company = org.get("name", "") if isinstance(org, dict) else (org or "")
+        return JobPosting(
+            company=company or _company_from_host(url),
+            title=strip_html(str(ld.get("title", ""))) or url,
+            url=url,
+            source="career_page",
+            location="; ".join(locations),
+            description=strip_html(str(ld.get("description", "")))[:20000],
+            salary_text=_ld_salary(ld),
+        )
     title_match = re.search(r"(?is)<title[^>]*>(.*?)</title>", body)
     title = strip_html(title_match.group(1)) if title_match else url
-    company = _host(url).removeprefix("www.").split(".")[0].title()
     return JobPosting(
-        company=company,
+        company=_company_from_host(url),
         title=title,
         url=url,
         source="career_page",
+        location="; ".join(locations),
         description=strip_html(body)[:20000],
+    )
+
+
+def _company_from_host(url: str) -> str:
+    host = _host(url).removeprefix("www.")
+    parts = host.split(".")
+    # careers.genmab.com -> Genmab, not "Careers"
+    if len(parts) > 2 and parts[0] in {"careers", "jobs", "career", "work", "join"}:
+        parts = parts[1:]
+    return parts[0].title()
+
+
+def _ld_job_posting(body: str) -> dict | None:
+    """The first schema.org JobPosting in the page's JSON-LD blocks."""
+    for match in re.finditer(
+        r'(?is)<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', body
+    ):
+        try:
+            data = json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            continue
+        stack = data if isinstance(data, list) else [data]
+        while stack:
+            item = stack.pop(0)
+            if not isinstance(item, dict):
+                continue
+            kind = item.get("@type")
+            if kind == "JobPosting" or (isinstance(kind, list) and "JobPosting" in kind):
+                return item
+            graph = item.get("@graph")
+            if isinstance(graph, list):
+                stack.extend(graph)
+    return None
+
+
+def _ld_locations(ld: dict) -> list[str]:
+    raw = ld.get("jobLocation") or []
+    places = raw if isinstance(raw, list) else [raw]
+    out: list[str] = []
+    for place in places:
+        if not isinstance(place, dict):
+            continue
+        address = place.get("address") or {}
+        if isinstance(address, str):
+            out.append(address)
+            continue
+        country = address.get("addressCountry")
+        if isinstance(country, dict):
+            country = country.get("name", "")
+        parts = [address.get("addressLocality"), address.get("addressRegion"), country]
+        text = ", ".join(str(p) for p in parts if p)
+        if text:
+            out.append(text)
+    if ld.get("jobLocationType") == "TELECOMMUTE":
+        out.append("Remote")
+    return out
+
+
+def _phenom_locations(body: str) -> list[str]:
+    """Locations from a Phenom page's ``multi_location`` array, if present."""
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'"multi_location"\s*:\s*\[', body):
+        try:
+            items, _ = decoder.raw_decode(body, match.end() - 1)
+        except json.JSONDecodeError:
+            continue
+        out: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            city = item.get("city") or item.get("cityState") or ""
+            country = item.get("country") or ""
+            text = ", ".join(p for p in (city, country) if p)
+            if text:
+                out.append(text)
+        if out:
+            return out
+    return []
+
+
+def _dedupe_locations(locations: list[str]) -> list[str]:
+    """Keep the first mention of each city, in page order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for loc in locations:
+        key = loc.split(",")[0].strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(loc.strip())
+    return out
+
+
+def _ld_salary(ld: dict) -> str:
+    salary = ld.get("baseSalary")
+    if not isinstance(salary, dict):
+        return ""
+    value = salary.get("value") or {}
+    currency = salary.get("currency", "")
+    if isinstance(value, dict):
+        low, high = value.get("minValue"), value.get("maxValue")
+        unit = value.get("unitText", "")
+        if low or high:
+            span = " - ".join(f"{v:,.0f}" if isinstance(v, (int, float)) else str(v) for v in (low, high) if v)
+            return " ".join(p for p in (currency, span, unit.lower() if unit else "") if p)
+    return ""
+
+
+_TRACKING_PARAMS = re.compile(r"^(utm_\w+|src|source|ref|gh_src|lever-source|trk|fbclid|gclid)$", re.I)
+
+
+def clean_posting_url(url: str) -> str:
+    """Drop tracking parameters so the same role always gets the same job id."""
+    parts = urllib.parse.urlsplit(url)
+    query = [
+        (k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        if not _TRACKING_PARAMS.match(k)
+    ]
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(query), "")
     )
 
 

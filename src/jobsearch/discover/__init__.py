@@ -16,7 +16,7 @@ from .sources import (
     strip_html,
     title_matches,
 )
-from .single import fetch_single_posting
+from .single import clean_posting_url, fetch_single_posting, posting_from_page
 from .websearch import web_search_discover
 
 log = logging.getLogger(__name__)
@@ -108,7 +108,9 @@ __all__ = [
     "board_url",
     "discover",
     "fetch_board",
+    "clean_posting_url",
     "fetch_single_posting",
+    "posting_from_page",
     "filter_postings",
     "strip_html",
     "title_matches",

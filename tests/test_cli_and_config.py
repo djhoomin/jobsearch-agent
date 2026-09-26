@@ -196,3 +196,76 @@ class TestDryRun:
         # The dry-run placeholder scores everything 3 and never builds a client.
         assert report.weighted == 3.0
         assert client._client is None  # noqa: SLF001 - asserting no client was built
+
+
+class TestAddFromUrl:
+    """`jobsearch add --url` reads the page; flags override what it says."""
+
+    URL = "https://careers.example.com/job/1/Head-of-AI?utm_source=linkedin&src=LinkedIn"
+
+    def _page(self):
+        return JobPosting(
+            company="Example", title="Head of AI", url="https://careers.example.com/job/1/Head-of-AI",
+            source="career_page", location="Princeton, United States; Utrecht, Netherlands",
+            description="Lead the AI function.",
+        )
+
+    def test_url_alone_fills_everything_and_drops_tracking(self, cfg, monkeypatch, capsys):
+        import jobsearch.cli as cli
+        import jobsearch.discover as discover
+
+        seen = []
+        monkeypatch.setattr(discover, "fetch_single_posting", lambda url, f, c: seen.append(url) or self._page())
+        args = build_parser().parse_args(["add", "--url", self.URL])
+        assert cli.cmd_add(cfg, args) == 0
+        assert seen == ["https://careers.example.com/job/1/Head-of-AI"]
+        from jobsearch.tracker import Tracker
+        t = Tracker.from_config(cfg)
+        try:
+            job_id = t.resolve_job_id("example-head-of-ai")
+            p = t.get_posting(job_id)
+        finally:
+            t.close()
+        assert p.location == "Princeton, United States; Utrecht, Netherlands"
+        assert p.url == "https://careers.example.com/job/1/Head-of-AI"
+        assert "location from the page" in capsys.readouterr().out
+
+    def test_flags_override_the_page(self, cfg, monkeypatch):
+        import jobsearch.cli as cli
+        import jobsearch.discover as discover
+
+        monkeypatch.setattr(discover, "fetch_single_posting", lambda url, f, c: self._page())
+        args = build_parser().parse_args(["add", "--url", self.URL, "--title", "VP AI"])
+        assert cli.cmd_add(cfg, args) == 0
+        from jobsearch.tracker import Tracker
+        t = Tracker.from_config(cfg)
+        try:
+            p = t.get_posting(t.resolve_job_id("example-vp-ai"))
+        finally:
+            t.close()
+        assert p.title == "VP AI"
+        assert "Utrecht" in p.location
+
+    def test_unreadable_page_without_flags_fails_clearly(self, cfg, monkeypatch, capsys):
+        import jobsearch.cli as cli
+        import jobsearch.discover as discover
+        from jobsearch.discover import DiscoveryError
+
+        def boom(url, f, c):
+            raise DiscoveryError("robots.txt disallows fetching it")
+
+        monkeypatch.setattr(discover, "fetch_single_posting", boom)
+        args = build_parser().parse_args(["add", "--url", self.URL])
+        assert cli.cmd_add(cfg, args) == 1
+        assert "--company and --title" in capsys.readouterr().err
+
+    def test_dry_run_with_url_does_not_fetch(self, cfg, monkeypatch, capsys):
+        import jobsearch.cli as cli
+        import jobsearch.discover as discover
+
+        called = []
+        monkeypatch.setattr(discover, "fetch_single_posting", lambda *a: called.append(a))
+        args = build_parser().parse_args(["--dry-run", "add", "--url", self.URL])
+        assert cli.cmd_add(cfg, args) == 0
+        assert called == []
+        assert "[dry-run] would read" in capsys.readouterr().out

@@ -136,21 +136,49 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
+    from .discover import DiscoveryError, Fetcher, clean_posting_url, fetch_single_posting
+
     description = ""
     if args.file:
         description = Path(args.file).read_text(encoding="utf-8")
     elif args.stdin:
         description = sys.stdin.read()
+    url = clean_posting_url(args.url) if args.url else ""
+
+    # With a URL, read the posting page and let the flags override what it
+    # says. Company, title and every listed location come from the page when
+    # the flags leave them out.
+    fetched = None
+    needs_page = url and not (args.company and args.title and args.location and description)
+    if needs_page and args.dry_run:
+        print(f"[dry-run] would read {url} for company, title, locations and description")
+        if not (args.company and args.title):
+            return 0
+        needs_page = False
+    if needs_page:
+        try:
+            fetched = fetch_single_posting(url, Fetcher.from_config(cfg), cfg)
+        except DiscoveryError as exc:
+            if not (args.company and args.title):
+                print(f"Could not read the posting: {exc}", file=sys.stderr)
+                print("Pass --company and --title, and the text via --file or --stdin.", file=sys.stderr)
+                return 1
+            print(f"warning: could not read the posting page ({exc}); using the flags only", file=sys.stderr)
+    if not fetched and not (args.company and args.title):
+        print("Pass --company and --title, or a --url the tool can read.", file=sys.stderr)
+        return 1
 
     posting = JobPosting(
-        company=args.company,
-        title=args.title,
-        url=args.url or "",
-        source="manual",
-        location=args.location or "",
-        description=description,
-        salary_text=args.salary or "",
+        company=args.company or fetched.company,
+        title=args.title or fetched.title,
+        url=url,
+        source="manual" if not fetched else fetched.source,
+        location=args.location or (fetched.location if fetched else ""),
+        description=description or (fetched.description if fetched else ""),
+        salary_text=args.salary or (fetched.salary_text if fetched else ""),
     )
+    if fetched and not args.location:
+        print(f"location from the page: {posting.location or 'none stated'}")
     board = cfg.board_for(posting.company)
     if board:
         posting.board_tier = board.tier
@@ -862,14 +890,20 @@ def build_parser() -> argparse.ArgumentParser:
         "add",
         help="Add a posting by hand (paste the text on stdin or via --file)",
         description=(
-            "For roles found somewhere this tool will not scrape. Paste the "
+            "Add one role. With --url alone the tool reads the posting page "
+            "(Greenhouse, Lever and Ashby through their APIs; anything else "
+            "through its schema.org data, robots.txt permitting) and records "
+            "every location it lists. For sites it will not read, paste the "
             "description on stdin or point --file at a text file."
         ),
     )
-    p.add_argument("--company", required=True)
-    p.add_argument("--title", required=True)
-    p.add_argument("--url")
-    p.add_argument("--location")
+    p.add_argument("--company", help="Read from the page when --url is given")
+    p.add_argument("--title", help="Read from the page when --url is given")
+    p.add_argument("--url", help="Posting URL; tracking parameters are dropped")
+    p.add_argument(
+        "--location",
+        help='Overrides the page. Several sites: "Utrecht, Netherlands; Copenhagen, Denmark"',
+    )
     p.add_argument("--salary")
     p.add_argument("--file", help="File containing the job description text")
     p.add_argument(
