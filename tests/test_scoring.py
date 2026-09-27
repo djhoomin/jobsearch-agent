@@ -194,6 +194,24 @@ class TestLocationConstraint:
         assert result.verdict is Verdict.FAIL
         assert result.evidence == "united states"
 
+    @pytest.mark.parametrize(
+        "location",
+        ["Foster City, CA", "Nashville, TN", "US-VA-McLean", "US-NC-Remote", "IN-Pune",
+         "CN-Beijing-MSO / CN-Shanghai-WW"],
+    )
+    def test_coded_non_eu_locations_fail(self, cfg, location):
+        """Seen 2026-09-27: boards write states and countries as codes a word list misses."""
+        assert check_location(make(location=location), cfg).verdict is Verdict.FAIL
+
+    @pytest.mark.parametrize("location", ["Remote in Europe or on-site in Amsterdam", "Utrecht or Amsterdam"])
+    def test_state_codes_are_case_sensitive(self, cfg, location):
+        """Lowercase "in" and "or" are words, never Indiana or Oregon."""
+        assert check_location(make(location=location), cfg).verdict is Verdict.PASS
+
+    def test_a_coded_us_office_with_a_european_option_passes(self, cfg):
+        posting = make(location="Foster City, CA / Amsterdam, Netherlands")
+        assert check_location(posting, cfg).verdict is Verdict.PASS
+
     def test_short_patterns_match_on_word_boundaries(self, cfg):
         """A bare "nl" pattern must not match inside "Finland"."""
         result = check_location(make(location="Helsinki, Finland"), cfg)

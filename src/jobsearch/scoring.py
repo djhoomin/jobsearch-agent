@@ -72,6 +72,25 @@ def _match_word(patterns: Iterable[str], haystack: str) -> str | None:
     return None
 
 
+#: US state after a comma ("Foster City, CA", "Austin, TX"). Case-sensitive on the
+#: original text: lowercased, "IN" and "OR" would be the words "in" and "or".
+_US_STATE = re.compile(
+    r",\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM"
+    r"|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b"
+)
+#: Country-prefixed office codes some boards use ("US-CA-Menlo Park", "IN-Pune").
+_COUNTRY_CODE = re.compile(r"(?<![A-Za-z])(US|IN|SG|JP|AU|BR|MX|CA|CN|KR|AE|IL)-[A-Z]")
+
+
+def _coded_location_block(location: str) -> str | None:
+    """Non-EU locations written as codes, which a word list cannot catch safely."""
+    for pattern in (_US_STATE, _COUNTRY_CODE):
+        m = pattern.search(location)
+        if m:
+            return m.group(0).strip(", ")
+    return None
+
+
 def check_visa(posting: JobPosting, cfg: Config) -> ConstraintResult:
     """IND recognised sponsor, or explicit sponsorship language in the posting.
 
@@ -264,7 +283,7 @@ def check_location(posting: JobPosting, cfg: Config) -> ConstraintResult:
             "location", Verdict.UNKNOWN, "Posting states no location"
         )
     allow_hit = _match_word(allowed, location)
-    block_hit = _match_word(blocked, location)
+    block_hit = _match_word(blocked, location) or _coded_location_block(posting.location or "")
     anchor_hit = _match_word(anchors, location)
 
     if block_hit and not anchor_hit:

@@ -151,6 +151,8 @@ blocked_location_patterns = [
   "united states", "usa", "san francisco", "new york", "seattle", "austin",
   "boston", "canada", "singapore", "tokyo", "sydney", "india", "bengaluru",
   "onsite in london", "on-site in london",
+  # Added 2026-09-27: city names and abbreviations boards actually use.
+  "nyc", "bay area", "santa clara", "foster city", "palo alto", "mountain view", "sunnyvale", "san jose", "san mateo", "redwood city", "redmond", "bellevue", "los angeles", "san diego", "chicago", "atlanta", "denver", "miami", "dallas", "houston", "raleigh", "pittsburgh", "toronto", "vancouver", "montreal", "pune", "hyderabad", "mumbai", "chennai", "gurugram", "gurgaon", "noida", "delhi", "sao paulo", "bogota", "riyadh", "doha", "abu dhabi", "china", "beijing", "shanghai", "shenzhen", "taiwan", "taipei",
 ]
 # Travel cap is roughly monthly. Weekly-travel roles are out.
 travel_fail_patterns = [
