@@ -13,6 +13,8 @@ from .sources import (
     board_url,
     fetch_board,
     filter_postings,
+    find_moved_board,
+    moved_board_hint,
     strip_html,
     title_matches,
 )
@@ -70,9 +72,15 @@ def discover(
         try:
             found = fetch_board(board, fetcher)
         except DiscoveryError as exc:
-            log.warning("%s: %s", board.company, exc)
-            report.errors.append(f"{board.company}: {exc}")
+            hint = moved_board_hint(board, fetcher) if "HTTP 404" in str(exc) else ""
+            log.warning("%s: %s%s", board.company, exc, hint)
+            report.errors.append(f"{board.company}: {exc}{hint}")
             continue
+        if not found:
+            # An empty 200 after a migration looks like a company with no jobs.
+            hint = moved_board_hint(board, fetcher)
+            if hint:
+                report.errors.append(f"{board.company}: board is empty{hint}")
         report.raw_count += len(found)
         report.postings.extend(found)
 

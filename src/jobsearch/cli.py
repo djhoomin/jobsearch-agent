@@ -793,7 +793,7 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     print(f"  {len(cfg.boards)} configured across tiers "
           f"{sorted({b.tier for b in cfg.boards})}")
     if args.boards:
-        from .discover import Fetcher, board_url, fetch_board
+        from .discover import Fetcher, board_url, fetch_board, moved_board_hint
         from .discover.sources import DiscoveryError
 
         fetcher = Fetcher.from_config(cfg)
@@ -807,14 +807,16 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
                     # token after an ATS migration, not a company with no jobs.
                     # Reporting it as ok hides that; it is the quietest way for
                     # a target to fall out of the sweep.
+                    hint = moved_board_hint(board, fetcher)
                     check(
                         f"  {board.company}",
                         False,
-                        "0 postings - the token answers but is empty; "
-                        "check whether they moved ATS",
+                        "0 postings - the token answers but is empty"
+                        + (hint or "; check whether they moved ATS"),
                     )
             except DiscoveryError as exc:
-                check(f"  {board.company}", False, f"{exc} - fix the token in config.local.toml")
+                hint = moved_board_hint(board, fetcher) if "HTTP 404" in str(exc) else ""
+                check(f"  {board.company}", False, f"{exc}{hint or ' - fix the token in config.local.toml'}")
     print("google sync:")
     enabled = cfg.get("google", "enabled", False)
     print(f"  {'enabled' if enabled else 'disabled (everything else still works)'}")

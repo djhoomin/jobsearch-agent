@@ -352,6 +352,49 @@ def fetch_board(board: BoardRef, fetcher: Fetcher) -> list[JobPosting]:
     return parser(payload, board)
 
 
+PROBE_ATS = ("ashby", "greenhouse", "lever")
+
+
+def _token_candidates(board: BoardRef) -> list[str]:
+    """The configured token plus the usual slugs of the company name."""
+    name = board.company.strip().lower()
+    slugs = [board.token, re.sub(r"[^a-z0-9]", "", name), re.sub(r"[^a-z0-9]+", "-", name).strip("-")]
+    return list(dict.fromkeys(t for t in slugs if t))
+
+
+def find_moved_board(board: BoardRef, fetcher: Fetcher) -> tuple[BoardRef, int] | None:
+    """Look for a company's board on another ATS after its own stopped working.
+
+    Companies migrate ATS and the old token starts answering 404 (ClickHouse moved
+    from Greenhouse to Ashby in September 2026). This tries the other supported
+    providers with the configured token and the company-name slugs, and returns the
+    first board that lists postings. It never edits the config; the caller reports.
+    """
+    for ats in PROBE_ATS:
+        for token in _token_candidates(board):
+            if (ats, token) == (board.ats, board.token):
+                continue
+            candidate = BoardRef(company=board.company, ats=ats, token=token, tier=board.tier,
+                                 ind_sponsor=board.ind_sponsor, gaming=board.gaming)
+            try:
+                found = fetch_board(candidate, fetcher)
+            except DiscoveryError:
+                continue
+            if found:
+                return candidate, len(found)
+    return None
+
+
+def moved_board_hint(board: BoardRef, fetcher: Fetcher) -> str:
+    """A one-line fix for config.local.toml, or an empty string."""
+    hit = find_moved_board(board, fetcher)
+    if not hit:
+        return ""
+    moved, count = hit
+    return (f" - found {count} postings on {moved.ats} as {moved.token!r}: "
+            f'set ats = "{moved.ats}", token = "{moved.token}" in config.local.toml')
+
+
 # ---------------------------------------------------------------------------
 # Title filtering
 # ---------------------------------------------------------------------------

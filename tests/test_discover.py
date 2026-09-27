@@ -502,3 +502,58 @@ def test_clean_posting_url_drops_radancy_ad_tags():
         "&p_uid=Cb5anSsSog&ss=paid&utm_campaign=sales_emea&utm_source=RD_Programmatic"
     )
     assert clean_posting_url(url) == "https://careers.netapp.com/job/-/-/27600/101042238944"
+
+
+class TestMovedBoard:
+    """A 404 or an empty board after an ATS migration comes with the fix."""
+
+    class _Fetcher:
+        def __init__(self, live: dict):
+            self.live = live
+            self.calls: list[str] = []
+
+        def get_json(self, url, check_robots=True):
+            from jobsearch.discover.sources import DiscoveryError
+
+            self.calls.append(url)
+            for key, payload in self.live.items():
+                if key in url:
+                    return payload
+            raise DiscoveryError(f"HTTP 404 from {url}")
+
+    def _board(self, ats="greenhouse", token="clickhouse"):
+        from jobsearch.discover.sources import BoardRef
+
+        return BoardRef(company="ClickHouse", ats=ats, token=token, tier=1)
+
+    def test_finds_the_new_ats_and_says_what_to_set(self):
+        from jobsearch.discover.sources import moved_board_hint
+
+        fetcher = self._Fetcher({"api.ashbyhq.com/posting-api/job-board/clickhouse": {
+            "jobs": [{"title": "Engineer", "jobUrl": "https://x/1"}, {"title": "Lead", "jobUrl": "https://x/2"}]}})
+        hint = moved_board_hint(self._board(), fetcher)
+        assert 'found 2 postings on ashby' in hint
+        assert 'set ats = "ashby", token = "clickhouse"' in hint
+
+    def test_tries_company_name_slugs_as_well(self):
+        from jobsearch.discover.sources import BoardRef, find_moved_board
+
+        board = BoardRef(company="Grafana Labs", ats="greenhouse", token="grafanalabsinc", tier=1)
+        fetcher = self._Fetcher({"job-board/grafana-labs": {"jobs": [{"title": "PM", "jobUrl": "u"}]}})
+        moved, count = find_moved_board(board, fetcher)
+        assert (moved.ats, moved.token, count) == ("ashby", "grafana-labs", 1)
+
+    def test_nothing_found_gives_no_hint(self):
+        from jobsearch.discover.sources import moved_board_hint
+
+        assert moved_board_hint(self._board(), self._Fetcher({})) == ""
+
+    def test_the_sweep_puts_the_hint_on_the_error_line(self, cfg, monkeypatch):
+        from jobsearch.discover import discover
+        import jobsearch.discover as d
+
+        monkeypatch.setattr(d, "_select_boards", lambda *a, **k: [self._board()])
+        fetcher = self._Fetcher({"api.ashbyhq.com/posting-api/job-board/clickhouse": {
+            "jobs": [{"title": "Engineer", "jobUrl": "https://x/1"}]}})
+        report = discover(cfg, fetcher=fetcher)
+        assert any("HTTP 404" in e and 'ats = "ashby"' in e for e in report.errors)
