@@ -155,6 +155,7 @@ blocked_location_patterns = [
   "nyc", "bay area", "santa clara", "foster city", "palo alto", "mountain view", "sunnyvale", "san jose", "san mateo", "redwood city", "redmond", "bellevue", "los angeles", "san diego", "chicago", "atlanta", "denver", "miami", "dallas", "houston", "raleigh", "pittsburgh", "toronto", "vancouver", "montreal", "pune", "hyderabad", "mumbai", "chennai", "gurugram", "gurgaon", "noida", "delhi", "sao paulo", "bogota", "riyadh", "doha", "abu dhabi", "china", "beijing", "shanghai", "shenzhen", "taiwan", "taipei",
   # UK is out, remote included (DJ, 2026-09-27): no UK right to work. A European option alongside still passes.
   "united kingdom", "uk", "england", "scotland", "wales", "london", "edinburgh", "manchester", "cambridge, uk", "bristol",
+  "amer", "americas", "north america",
 ]
 # Travel cap is roughly monthly. Weekly-travel roles are out.
 travel_fail_patterns = [
