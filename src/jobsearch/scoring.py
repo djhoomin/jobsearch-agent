@@ -94,9 +94,10 @@ def _coded_location_block(location: str) -> str | None:
 def check_visa(posting: JobPosting, cfg: Config) -> ConstraintResult:
     """IND recognised sponsor, or explicit sponsorship language in the posting.
 
-    A US-headquartered company with no NL entity is not automatically a fail:
-    remote-EU employment through an EOR can work, it just does not carry
-    kennismigrant status. The filter therefore fails only where the posting
+    A company with no NL entity is not automatically a fail: an employer of
+    record that is itself an IND recognised sponsor can employ the candidate
+    with kennismigrant status (Deel Nederland B.V. and Velocity Global B.V. were
+    on the register on 2026-09-03). The filter therefore fails only where the posting
     *rules sponsorship out* or the board is flagged as a non-sponsor for a role
     that requires being in the Netherlands.
     """
@@ -142,8 +143,9 @@ def check_visa(posting: JobPosting, cfg: Config) -> ConstraintResult:
         return ConstraintResult(
             "visa",
             Verdict.UNKNOWN,
-            "Employer has no NL entity on the IND register - viable only as "
-            "remote-EU or via an EOR without kennismigrant status. Legal check needed.",
+            "Employer is not on the IND register - viable through an employer of record "
+            "that is itself a recognised sponsor (the register lists some, e.g. Deel "
+            "Nederland B.V.), which keeps kennismigrant status. Ask which EOR they use.",
         )
     return ConstraintResult(
         "visa",
