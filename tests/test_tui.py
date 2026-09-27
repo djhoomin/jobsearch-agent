@@ -1969,3 +1969,78 @@ class TestReviewedVersusNotReviewed:
         from jobsearch.tui import role_detail_markup
 
         assert "ADVERSARIAL REVIEW" not in role_detail_markup(cfg, seed(cfg))
+
+
+class TestRecruitersView:
+    """R opens the recruiters view; overdue and quiet relationships are flagged."""
+
+    def test_flags(self):
+        from datetime import date
+
+        from jobsearch.tui import recruiter_flags
+
+        today = date(2026, 10, 10)
+        assert recruiter_flags({"status": "active", "due": "2026-10-01",
+                                "last_contact": "2026-10-09T10:00:00+00:00"}, today) == ["overdue"]
+        assert recruiter_flags({"status": "contacted", "due": None,
+                                "last_contact": "2026-08-01T10:00:00+00:00"}, today) == ["quiet"]
+        assert recruiter_flags({"status": "new", "due": None, "last_contact": None}, today) == ["quiet"]
+        assert recruiter_flags({"status": "closed", "due": None, "last_contact": None}, today) == []
+
+    def test_label_shows_status_and_next_step(self):
+        from datetime import date
+
+        from jobsearch.tui import recruiter_label
+
+        row = {"name": "Sam", "firm": "Example Search", "status": "active", "due": "2026-10-20",
+               "next_action": "send profile", "last_contact": "2026-10-08T09:00:00+00:00"}
+        label = recruiter_label(row, date(2026, 10, 10))
+        assert "Sam" in label and "Example Search" in label and "2d ago" in label
+        assert "send profile" in label and "due 2026-10-20" in label
+
+    def test_capital_r_opens_the_view_and_a_adds_a_recruiter(self, cfg):
+        seed(cfg)
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("R")
+                await pilot.pause()
+                assert len(app.screen_stack) == 2, "R did not open the recruiters view"
+                await pilot.press("a")
+                await pilot.pause()
+                assert len(app.screen_stack) == 3, "a did not open the recruiter form"
+                for ch in "Example Search":
+                    await pilot.press("space" if ch == " " else ch)
+                await pilot.press("ctrl+s")
+                await pilot.pause()
+                assert len(app.screen_stack) == 2
+                from jobsearch.tui import recruiter_rows
+
+                assert [r["firm"] for r in recruiter_rows(cfg)] == ["Example Search"]
+                await pilot.press("enter")
+                await pilot.pause()
+                assert len(app.screen_stack) == 3, "enter did not open the log form"
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("escape")
+                await pilot.pause()
+                assert len(app.screen_stack) == 1
+
+        asyncio.run(scenario())
+
+    def test_startup_mentions_overdue_follow_ups(self, cfg):
+        seed(cfg)
+        from jobsearch.tracker import Tracker
+
+        with Tracker.from_config(cfg) as tracker:
+            tracker.add_recruiter("Example Search", name="Sam", due="2020-01-01")
+
+        async def scenario():
+            app = build_app(cfg)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert any("overdue" in line for line in app.log_history)
+
+        asyncio.run(scenario())

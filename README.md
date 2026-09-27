@@ -578,6 +578,12 @@ Calls, emails, meetings, messages and pitches move "last contact" forward and li
 recruiter to "contacted"; a `note` records something without counting as contact. A pitch can
 link a tracked job, so a role you already have shows who brought it.
 
+In the TUI, press **R** for the Recruiters view: overdue follow-ups are marked red and open
+relationships with no contact for 30 days yellow, with the selected recruiter's history below.
+Enter logs a call, email, meeting, message or note; `a` adds, `e` edits, `p` records a pitched
+role, and `u` / `c` / `x` mark a relationship active, cold or closed. The main screen's log says
+when any follow-up is overdue.
+
 ### `attach-cv`
 
 ```bash

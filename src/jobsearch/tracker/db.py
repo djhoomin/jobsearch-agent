@@ -724,6 +724,28 @@ class Tracker:
             )
             return int(cur.lastrowid)
 
+    def update_recruiter(self, recruiter_id: int, **fields: Any) -> None:
+        """Edit a recruiter's details or status. Empty strings clear a field."""
+        allowed = {"firm", "name", "specialism", "email", "phone", "profile_url", "status",
+                   "next_action", "due", "notes"}
+        bad = set(fields) - allowed
+        if bad:
+            raise TrackerError(f"Unknown recruiter field(s): {', '.join(sorted(bad))}")
+        if fields.get("status") and fields["status"] not in self.RECRUITER_STATUSES:
+            raise TrackerError(f"Status must be one of: {', '.join(self.RECRUITER_STATUSES)}")
+        if "firm" in fields and not str(fields["firm"] or "").strip():
+            raise TrackerError("A recruiter needs a firm")
+        self.get_recruiter(recruiter_id)
+        values = {k: (v if v not in ("",) else None) for k, v in fields.items() if v is not None}
+        if not values:
+            return
+        values["updated_at"] = _now()
+        with self._tx() as conn:
+            conn.execute(
+                f"UPDATE recruiter SET {', '.join(f'{k} = ?' for k in values)} WHERE id = ?",
+                [*values.values(), recruiter_id],
+            )
+
     def recruiter_events(self, recruiter_id: int) -> list[sqlite3.Row]:
         return list(self._conn.execute(
             "SELECT * FROM recruiter_event WHERE recruiter_id = ? ORDER BY created_at, id",

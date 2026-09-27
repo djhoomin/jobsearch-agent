@@ -11,6 +11,7 @@ are turned into a plain instruction rather than a traceback.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -918,6 +919,143 @@ def role_detail_text(cfg: Config, job_id: str) -> str:
     return "\n".join(lines)
 
 
+# -- recruiters ---------------------------------------------------------------
+
+#: An open relationship with no contact for this long is flagged as going quiet.
+RECRUITER_QUIET_DAYS = 30
+
+
+def recruiter_rows(cfg: Config) -> list[Any]:
+    """Every recruiter, most urgent first (due date, then longest silence)."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        return tracker.list_recruiters()
+
+
+def recruiter_flags(row: Any, today: date | None = None) -> list[str]:
+    """What needs attention: an overdue next action, or a quiet open relationship."""
+    today = today or datetime.now(timezone.utc).date()
+    flags = []
+    due = str(_get(row, "due", "") or "")
+    if due:
+        try:
+            if date.fromisoformat(due[:10]) < today:
+                flags.append("overdue")
+        except ValueError:
+            pass
+    if str(_get(row, "status", "")) in ("new", "contacted", "active"):
+        last = str(_get(row, "last_contact", "") or "")
+        quiet = not last
+        if last:
+            try:
+                quiet = (today - datetime.fromisoformat(last).date()).days >= RECRUITER_QUIET_DAYS
+            except ValueError:
+                quiet = False
+        if quiet:
+            flags.append("quiet")
+    return flags
+
+
+def recruiter_label(row: Any, today: date | None = None) -> str:
+    """One line for the list: flags, who, where, status, last contact, next step."""
+    today = today or datetime.now(timezone.utc).date()
+    flags = recruiter_flags(row, today)
+    badge = "".join(
+        {"overdue": "[red]● overdue[/] ", "quiet": "[yellow]● quiet[/] "}[f] for f in flags
+    )
+    name = str(_get(row, "name", "") or "").strip() or "(no name)"
+    firm = str(_get(row, "firm", "") or "")
+    last = str(_get(row, "last_contact", "") or "")
+    if last:
+        try:
+            days = (today - datetime.fromisoformat(last).date()).days
+            last = "today" if days <= 0 else f"{days}d ago"
+        except ValueError:
+            pass
+    nxt = str(_get(row, "next_action", "") or "")
+    due = str(_get(row, "due", "") or "")
+    tail = f" · next: {nxt}" + (f" (due {due})" if due else "") if nxt or due else ""
+    return (f"{badge}[b]{name}[/] · {firm} · {_get(row, 'status', '')}"
+            f" · last {last or 'never'}{tail}")
+
+
+def recruiter_detail_text(cfg: Config, recruiter_id: int) -> str:
+    """The recruiter's details and full history, newest last."""
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        row = tracker.get_recruiter(recruiter_id)
+        events = tracker.recruiter_events(recruiter_id)
+    lines = []
+    for label, key in (("specialism", "specialism"), ("email", "email"), ("phone", "phone"),
+                       ("profile", "profile_url"), ("notes", "notes")):
+        if row[key]:
+            lines.append(f"[dim]{label}[/]  {row[key]}")
+    if events:
+        lines.append("")
+        for e in events:
+            role = " - ".join(x for x in (e["company"], e["title"]) if x)
+            job = f" [dim]{e['job_id']}[/]" if e["job_id"] else ""
+            body = e["body"] or ""
+            text = "  ".join(x for x in (role + job, body) if x)
+            lines.append(f"[dim]{e['created_at'][:10]}[/]  [b]{e['kind']}[/]  {text}")
+    else:
+        lines.append("[dim]No history yet: press enter to log a call or email.[/]")
+    return "\n".join(lines)
+
+
+def overdue_recruiter_count(cfg: Config) -> int:
+    return sum("overdue" in recruiter_flags(r) for r in recruiter_rows(cfg))
+
+
+def save_recruiter_blocking(cfg: Config, recruiter_id: int | None, **fields: Any) -> str:
+    """Add a recruiter (no id) or update one. Returns a line for the log."""
+    from .tracker import Tracker
+
+    firm = str(fields.get("firm", "") or "").strip()
+    if not firm:
+        raise ValueError("A recruiter needs a firm")
+    clean = {k: (str(v).strip() if v is not None else None) for k, v in fields.items()}
+    with Tracker.from_config(cfg) as tracker:
+        if recruiter_id is None:
+            clean.pop("firm")
+            rid = tracker.add_recruiter(firm, **{k: v for k, v in clean.items() if v})
+            return f"added recruiter {clean.get('name') or firm} ({firm}), id {rid}"
+        tracker.update_recruiter(recruiter_id, **clean)
+        return f"updated recruiter {clean.get('name') or firm}"
+
+
+def log_recruiter_blocking(
+    cfg: Config, recruiter_id: int, kind: str, body: str = "", *,
+    company: str = "", title: str = "", job_id: str = "", next_action: str = "", due: str = "",
+    status: str | None = None,
+) -> str:
+    """Record contact, a note or a pitch. Returns a line for the log."""
+    from .tracker import Tracker
+
+    kind = kind.strip().lower()
+    with Tracker.from_config(cfg) as tracker:
+        tracker.log_recruiter(
+            recruiter_id, kind, body.strip(),
+            company=company.strip() or None, title=title.strip() or None,
+            job_id=job_id.strip() or None, status=status,
+            next_action=next_action.strip() if next_action.strip() else None,
+            due=due.strip() if due.strip() else None,
+        )
+        name = tracker.get_recruiter(recruiter_id)["name"] or tracker.get_recruiter(recruiter_id)["firm"]
+    return f"logged {kind} with {name}"
+
+
+def set_recruiter_status_blocking(cfg: Config, recruiter_id: int, status: str) -> str:
+    from .tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        tracker.update_recruiter(recruiter_id, status=status)
+        row = tracker.get_recruiter(recruiter_id)
+    return f"{row['name'] or row['firm']} → {status}"
+
+
 def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
     """Construct the Textual app. Imports Textual lazily so import is cheap."""
     _require_textual()
@@ -944,6 +1082,9 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
         #settings { padding: 1 2; height: 1fr; background: $surface; }
         #settings Input { margin-bottom: 1; }
         #picker { padding: 1 2; height: auto; background: $surface; border: solid $accent; }
+        #recruiters { padding: 1 2; height: 1fr; background: $surface; border: solid $accent; }
+        #recruiterlist { height: auto; max-height: 60%; min-height: 3; }
+        #recruiter-detail { height: auto; max-height: 14; border-top: solid $accent; padding: 1 0 0 0; }
         #newrole { padding: 1 2; height: 1fr; background: $surface; border: solid $accent; }
         #newrole Input { margin-bottom: 1; }
         #f-description { height: 12; }
@@ -966,6 +1107,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             Binding("h", "toggle_hidden", "Show hidden"),
             Binding("f", "scan", "Scan boards"),
             Binding("comma", "settings", "Settings"),
+            Binding("R", "recruiters", "Recruiters"),
             Binding("S", "score_all", "Score all"),
             Binding("y", "copy_log", "Copy log"),
             Binding("r", "refresh_rows", "Refresh"),
@@ -1015,6 +1157,13 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             self.action_refresh_rows()
             if self.dry_run:
                 self.log_line("[yellow]dry-run: no API calls, nothing written[/]")
+            try:
+                overdue = overdue_recruiter_count(self.cfg)
+            except Exception:  # noqa: BLE001 - a reminder must never stop the app opening
+                overdue = 0
+            if overdue:
+                plural = "s" if overdue > 1 else ""
+                self.log_line(f"[red]{overdue} recruiter follow-up{plural} overdue[/]  press R")
 
         # -- data --------------------------------------------------------
 
@@ -1220,6 +1369,13 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             if self.busy:
                 self.stop_batch = True
                 self.log_line("[yellow]stopping after the current role…[/]")
+
+        def action_recruiters(self) -> None:
+            self.push_screen(RecruitersScreen(self.cfg), self.after_recruiters)
+
+        def after_recruiters(self, message: str | None) -> None:
+            if message:
+                self.log_line(message)
 
         def action_settings(self) -> None:
             self.push_screen(SettingsScreen(self.cfg), self.after_settings)
@@ -1706,6 +1862,212 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             if message:
                 self.message = message
             self.reload()
+
+        def action_cancel(self) -> None:
+            self.dismiss(self.message)
+
+    class RecruiterFormScreen(ModalScreen):  # type: ignore[misc]
+        """Add a recruiter, or edit one."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel"),
+            Binding("ctrl+s", "save", "Save"),
+        ]
+        FIELDS = (("firm", "firm (required)"), ("name", "name"),
+                  ("specialism", "specialism, e.g. data & AI leadership, Benelux"),
+                  ("email", "email"), ("phone", "phone"), ("profile_url", "profile or firm URL"),
+                  ("next_action", "next action"), ("due", "due date, YYYY-MM-DD"), ("notes", "notes"))
+
+        def __init__(self, cfg: Config, row: Any = None) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.row = row
+
+        def compose(self) -> ComposeResult:
+            verb = "Edit" if self.row is not None else "Add a"
+            with Vertical(id="newrole"):
+                yield Static(f"[b]{verb} recruiter[/]  [dim]ctrl+s to save, esc to cancel[/]")
+                for key, hint in self.FIELDS:
+                    value = str(_get(self.row, key, "") or "") if self.row is not None else ""
+                    yield Input(value=value, placeholder=hint, id=f"r-{key}")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#r-firm", Input).focus()
+
+        def action_save(self) -> None:
+            values = {key: self.query_one(f"#r-{key}", Input).value for key, _ in self.FIELDS}
+            try:
+                rid = int(_get(self.row, "id", 0)) if self.row is not None else None
+                self.dismiss(save_recruiter_blocking(self.cfg, rid, **values))
+            except Exception as exc:  # noqa: BLE001 - shown in the recruiters view
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class RecruiterLogScreen(ModalScreen):  # type: ignore[misc]
+        """Log contact or a note, or record a pitched role."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel"),
+            Binding("ctrl+s", "save", "Save"),
+        ]
+
+        def __init__(self, cfg: Config, row: Any, pitch: bool = False) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.row = row
+            self.pitch = pitch
+
+        def compose(self) -> ComposeResult:
+            who = _get(self.row, "name", "") or _get(self.row, "firm", "")
+            with Vertical(id="newrole"):
+                if self.pitch:
+                    yield Static(f"[b]Role pitched by {who}[/]  [dim]ctrl+s to save, esc to cancel[/]")
+                    yield Input(placeholder="company (required)", id="l-company")
+                    yield Input(placeholder="title (required)", id="l-title")
+                    yield Input(placeholder="tracked job id (optional)", id="l-job")
+                else:
+                    yield Static(f"[b]Log with {who}[/]  [dim]ctrl+s to save, esc to cancel[/]")
+                    yield Input(value="call", placeholder="call, email, meeting, message or note", id="l-kind")
+                yield Input(placeholder="what happened", id="l-body")
+                yield Input(value=str(_get(self.row, "next_action", "") or ""), placeholder="next action", id="l-next")
+                yield Input(value=str(_get(self.row, "due", "") or ""), placeholder="due date, YYYY-MM-DD", id="l-due")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.query_one("#l-company" if self.pitch else "#l-body", Input).focus()
+
+        def action_save(self) -> None:
+            def value(name: str) -> str:
+                return self.query_one(f"#l-{name}", Input).value
+
+            try:
+                rid = int(_get(self.row, "id", 0))
+                if self.pitch:
+                    if not value("company").strip() or not value("title").strip():
+                        raise ValueError("A pitch needs a company and a title")
+                    message = log_recruiter_blocking(
+                        self.cfg, rid, "pitch", value("body"), company=value("company"),
+                        title=value("title"), job_id=value("job"),
+                        next_action=value("next"), due=value("due"))
+                else:
+                    message = log_recruiter_blocking(
+                        self.cfg, rid, value("kind"), value("body"),
+                        next_action=value("next"), due=value("due"))
+            except Exception as exc:  # noqa: BLE001 - shown in the recruiters view
+                self.dismiss(f"[red]{type(exc).__name__}:[/] {exc}")
+                return
+            self.dismiss(message)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+    class RecruitersScreen(ModalScreen):  # type: ignore[misc]
+        """Search firms and recruiters: who needs a follow-up, and the history of each."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Back"),
+            Binding("a", "add", "Add"),
+            Binding("e", "edit", "Edit"),
+            Binding("p", "pitch", "Pitched role"),
+            Binding("c", "mark('cold')", "Mark cold"),
+            Binding("x", "mark('closed')", "Close"),
+            Binding("u", "mark('active')", "Mark active"),
+        ]
+
+        def __init__(self, cfg: Config) -> None:
+            super().__init__()
+            self.cfg = cfg
+            self.rows: list[Any] = []
+            self.message: str | None = None
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="recruiters"):
+                yield Static(
+                    "[b]Recruiters[/]  [dim]enter log · a add · e edit · p pitched role · "
+                    "u active · c cold · x close · esc back[/]", id="recruiters-head")
+                yield OptionList(id="recruiterlist")
+                yield Static("", id="recruiter-detail")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.reload()
+            self.query_one("#recruiterlist", OptionList).focus()
+
+        def reload(self, keep: int | None = None) -> None:
+            self.rows = recruiter_rows(self.cfg)
+            listing = self.query_one("#recruiterlist", OptionList)
+            listing.clear_options()
+            for row in self.rows:
+                listing.add_option(recruiter_label(row))
+            if not self.rows:
+                listing.add_option("(none yet — press a to add a recruiter)")
+                self.query_one("#recruiter-detail", Static).update("")
+                return
+            index = 0
+            if keep is not None:
+                index = next((i for i, r in enumerate(self.rows) if int(_get(r, "id", 0)) == keep), 0)
+            listing.highlighted = index
+            self.show_detail()
+
+        def selected(self) -> Any | None:
+            index = self.query_one("#recruiterlist", OptionList).highlighted
+            if index is None or not self.rows or index >= len(self.rows):
+                return None
+            return self.rows[index]
+
+        def show_detail(self) -> None:
+            row = self.selected()
+            detail = self.query_one("#recruiter-detail", Static)
+            if row is None:
+                detail.update("")
+                return
+            text = recruiter_detail_text(self.cfg, int(_get(row, "id", 0)))
+            if self.message:
+                text = f"{self.message}\n\n{text}"
+            detail.update(text)
+
+        def on_option_list_option_highlighted(self, _event: Any) -> None:
+            self.show_detail()
+
+        def on_option_list_option_selected(self, _event: Any) -> None:
+            row = self.selected()
+            if row is not None:
+                self.app.push_screen(RecruiterLogScreen(self.cfg, row), self.after_change)
+
+        def current_id(self) -> int | None:
+            row = self.selected()
+            return int(_get(row, "id", 0)) if row is not None else None
+
+        def action_add(self) -> None:
+            self.app.push_screen(RecruiterFormScreen(self.cfg), self.after_change)
+
+        def action_edit(self) -> None:
+            row = self.selected()
+            if row is not None:
+                self.app.push_screen(RecruiterFormScreen(self.cfg, row), self.after_change)
+
+        def action_pitch(self) -> None:
+            row = self.selected()
+            if row is not None:
+                self.app.push_screen(RecruiterLogScreen(self.cfg, row, pitch=True), self.after_change)
+
+        def action_mark(self, status: str) -> None:
+            rid = self.current_id()
+            if rid is None:
+                return
+            try:
+                self.message = set_recruiter_status_blocking(self.cfg, rid, status)
+            except Exception as exc:  # noqa: BLE001
+                self.message = f"[red]{type(exc).__name__}:[/] {exc}"
+            self.reload(keep=rid)
+
+        def after_change(self, message: str | None) -> None:
+            if message:
+                self.message = message
+            self.reload(keep=self.current_id())
 
         def action_cancel(self) -> None:
             self.dismiss(self.message)
