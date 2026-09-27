@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -571,6 +572,85 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _age(ts: str | None) -> str:
+    """'12d ago' for an ISO timestamp, '-' for none."""
+    if not ts:
+        return "-"
+    try:
+        then = datetime.fromisoformat(ts)
+    except ValueError:
+        return ts
+    days = (datetime.now(timezone.utc) - then).days
+    return "today" if days <= 0 else f"{days}d ago"
+
+
+def cmd_recruiter(cfg: Config, args: argparse.Namespace) -> int:
+    """Search firms and recruiters: who covers what, when you last spoke, what they pitched."""
+    from .tracker import TrackerError
+
+    tracker = _tracker(cfg)
+    try:
+        action = args.recruiter_action
+        if action == "add":
+            rid = tracker.add_recruiter(
+                args.firm, name=args.name, specialism=args.specialism, email=args.email,
+                phone=args.phone, profile_url=args.url, notes=args.notes,
+                next_action=args.next, due=args.due,
+            )
+            print(f"Added recruiter {rid}: {args.name or '(no name)'} at {args.firm}")
+            return 0
+        if action == "list":
+            rows = tracker.list_recruiters(status=args.status, cold_days=args.cold)
+            if args.json:
+                print(json.dumps([dict(r) for r in rows], indent=2, default=str))
+                return 0
+            if not rows:
+                print("No recruiters" + (" going cold." if args.cold is not None else " yet. Add one with: jobsearch recruiter add FIRM --name NAME"))
+                return 0
+            print(f"{'ID':>3}  {'FIRM':<24} {'NAME':<22} {'STATUS':<10} {'LAST CONTACT':<13} NEXT")
+            for r in rows:
+                nxt = " ".join(x for x in (r["next_action"] or "", f"(due {r['due']})" if r["due"] else "") if x)
+                print(f"{r['id']:>3}  {r['firm'][:24]:<24} {(r['name'] or '')[:22]:<22} {r['status']:<10} "
+                      f"{_age(r['last_contact']):<13} {nxt}")
+            return 0
+        rid = args.id
+        if action == "show":
+            r = tracker.get_recruiter(rid)
+            print(f"{r['name'] or '(no name)'} - {r['firm']}   [{r['status']}]")
+            for label, key in (("specialism", "specialism"), ("email", "email"), ("phone", "phone"),
+                               ("profile", "profile_url"), ("next", "next_action"), ("due", "due"),
+                               ("notes", "notes")):
+                if r[key]:
+                    print(f"  {label + ':':<12}{r[key]}")
+            print(f"  {'last:':<12}{_age(r['last_contact'])}")
+            events = tracker.recruiter_events(rid)
+            if events:
+                print()
+                for e in events:
+                    role = " - ".join(x for x in (e["company"], e["title"]) if x)
+                    job = f" [{e['job_id']}]" if e["job_id"] else ""
+                    text = "  ".join(x for x in (role + job, e["body"] or "") if x)
+                    print(f"  {e['created_at'][:10]}  {e['kind']:<8} {text}")
+            return 0
+        if action == "log":
+            tracker.log_recruiter(rid, args.kind, args.body or "", status=args.status,
+                                  next_action=args.next, due=args.due)
+            print(f"Logged {args.kind} for recruiter {rid}")
+            return 0
+        if action == "pitch":
+            tracker.log_recruiter(rid, "pitch", args.note or "", company=args.company,
+                                  title=args.title, job_id=args.job, status=args.status,
+                                  next_action=args.next, due=args.due)
+            print(f"Logged pitch from recruiter {rid}: {args.company} - {args.title}")
+            return 0
+        raise TrackerError(f"Unknown recruiter action {action!r}")
+    except TrackerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        tracker.close()
+
+
 def cmd_show(cfg: Config, args: argparse.Namespace) -> int:
     tracker = _tracker(cfg)
     try:
@@ -1108,6 +1188,50 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.set_defaults(func=cmd_tui)
+
+    # recruiter
+    p = sub.add_parser(
+        "recruiter",
+        help="Log search firms and recruiters: coverage, contact history, roles pitched",
+        description=(
+            "Relationships with recruiters, kept apart from roles. 'list --cold 30' shows "
+            "open relationships with no contact for 30 days."
+        ),
+    )
+    rsub = p.add_subparsers(dest="recruiter_action", required=True)
+    r = rsub.add_parser("add", help="Add a recruiter")
+    r.add_argument("firm")
+    r.add_argument("--name")
+    r.add_argument("--specialism", help="e.g. 'data & AI leadership, Benelux'")
+    r.add_argument("--email")
+    r.add_argument("--phone")
+    r.add_argument("--url", help="Profile or firm page")
+    r.add_argument("--notes")
+    r.add_argument("--next", help="Next action")
+    r.add_argument("--due", help="YYYY-MM-DD")
+    r = rsub.add_parser("list", help="List recruiters, most overdue first")
+    r.add_argument("--status", choices=("new", "contacted", "active", "cold", "closed"))
+    r.add_argument("--cold", type=int, metavar="DAYS", help="Open relationships with no contact for DAYS days")
+    r.add_argument("--json", action="store_true")
+    r = rsub.add_parser("show", help="One recruiter with their history")
+    r.add_argument("id", type=int)
+    r = rsub.add_parser("log", help="Record a call, email, meeting, message or note")
+    r.add_argument("id", type=int)
+    r.add_argument("kind", choices=("call", "email", "meeting", "message", "note"))
+    r.add_argument("body", nargs="?", default="")
+    r.add_argument("--status", choices=("new", "contacted", "active", "cold", "closed"))
+    r.add_argument("--next", help="Next action ('' clears it)")
+    r.add_argument("--due", help="YYYY-MM-DD ('' clears it)")
+    r = rsub.add_parser("pitch", help="Record a role a recruiter put forward")
+    r.add_argument("id", type=int)
+    r.add_argument("--company", required=True)
+    r.add_argument("--title", required=True)
+    r.add_argument("--job", help="Tracked job id (or a unique prefix) to link")
+    r.add_argument("--note")
+    r.add_argument("--status", choices=("new", "contacted", "active", "cold", "closed"))
+    r.add_argument("--next")
+    r.add_argument("--due")
+    p.set_defaults(func=cmd_recruiter)
 
     p = sub.add_parser("doctor", help="Check config, source documents, Chrome, credentials")
     p.add_argument(

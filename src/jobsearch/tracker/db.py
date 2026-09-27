@@ -20,7 +20,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 
@@ -104,6 +104,36 @@ CREATE TABLE IF NOT EXISTS note (
     job_id     TEXT NOT NULL REFERENCES job(job_id) ON DELETE CASCADE,
     body       TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+-- Recruiters and search firms: relationships, not roles. One row per person;
+-- the history of calls, emails and roles they pitched lives in recruiter_event.
+CREATE TABLE IF NOT EXISTS recruiter (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    firm         TEXT NOT NULL,
+    name         TEXT,
+    specialism   TEXT,
+    email        TEXT,
+    phone        TEXT,
+    profile_url  TEXT,
+    status       TEXT NOT NULL DEFAULT 'new',
+    last_contact TEXT,
+    next_action  TEXT,
+    due          TEXT,
+    notes        TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recruiter_event (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recruiter_id INTEGER NOT NULL REFERENCES recruiter(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL,
+    company      TEXT,
+    title        TEXT,
+    job_id       TEXT REFERENCES job(job_id) ON DELETE SET NULL,
+    body         TEXT,
+    created_at   TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_status ON job(status);
@@ -596,6 +626,110 @@ class Tracker:
             )
 
     # -- reporting ---------------------------------------------------------
+    # -- recruiters -----------------------------------------------------------
+    RECRUITER_STATUSES = ("new", "contacted", "active", "cold", "closed")
+    #: Event kinds that count as being in touch; a note to self does not.
+    CONTACT_KINDS = ("call", "email", "meeting", "message", "pitch")
+    EVENT_KINDS = CONTACT_KINDS + ("note",)
+
+    def add_recruiter(self, firm: str, **fields: Any) -> int:
+        allowed = {"name", "specialism", "email", "phone", "profile_url", "status",
+                   "next_action", "due", "notes"}
+        bad = set(fields) - allowed
+        if bad:
+            raise TrackerError(f"Unknown recruiter field(s): {', '.join(sorted(bad))}")
+        status = fields.get("status") or "new"
+        if status not in self.RECRUITER_STATUSES:
+            raise TrackerError(f"Status must be one of: {', '.join(self.RECRUITER_STATUSES)}")
+        now = _now()
+        values = {k: v for k, v in fields.items() if v is not None and k != "status"}
+        cols = ["firm", "status", "created_at", "updated_at", *values]
+        with self._tx() as conn:
+            cur = conn.execute(
+                f"INSERT INTO recruiter ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                [firm, status, now, now, *values.values()],
+            )
+            return int(cur.lastrowid)
+
+    def get_recruiter(self, recruiter_id: int) -> sqlite3.Row:
+        row = self._conn.execute("SELECT * FROM recruiter WHERE id = ?", (recruiter_id,)).fetchone()
+        if row is None:
+            raise TrackerError(f"No recruiter with id {recruiter_id}")
+        return row
+
+    def list_recruiters(self, status: str | None = None, cold_days: int | None = None) -> list[sqlite3.Row]:
+        """Recruiters, most overdue first. ``cold_days`` keeps only open relationships
+        (new, contacted, active) with no contact for at least that many days."""
+        sql = "SELECT * FROM recruiter"
+        where, params = [], []
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if cold_days is not None:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=cold_days)).isoformat(timespec="seconds")
+            where.append("status IN ('new', 'contacted', 'active')")
+            where.append("(last_contact IS NULL OR last_contact < ?)")
+            params.append(cutoff)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY (due IS NULL), due, (last_contact IS NULL) DESC, last_contact, firm"
+        return list(self._conn.execute(sql, params))
+
+    def log_recruiter(
+        self,
+        recruiter_id: int,
+        kind: str,
+        body: str = "",
+        *,
+        company: str | None = None,
+        title: str | None = None,
+        job_id: str | None = None,
+        status: str | None = None,
+        next_action: str | None = None,
+        due: str | None = None,
+    ) -> int:
+        """Record a call, email, meeting, message, pitch or note.
+
+        Contact kinds move ``last_contact`` forward and lift a ``new`` recruiter to
+        ``contacted``; a note does neither. A pitched role can point at a tracked job.
+        """
+        if kind not in self.EVENT_KINDS:
+            raise TrackerError(f"Kind must be one of: {', '.join(self.EVENT_KINDS)}")
+        if status and status not in self.RECRUITER_STATUSES:
+            raise TrackerError(f"Status must be one of: {', '.join(self.RECRUITER_STATUSES)}")
+        current = self.get_recruiter(recruiter_id)
+        if job_id:
+            job_id = self.resolve_job_id(job_id)
+        now = _now()
+        updates: dict[str, Any] = {"updated_at": now}
+        if kind in self.CONTACT_KINDS:
+            updates["last_contact"] = now
+            if current["status"] == "new" and not status:
+                updates["status"] = "contacted"
+        if status:
+            updates["status"] = status
+        if next_action is not None:
+            updates["next_action"] = next_action or None
+        if due is not None:
+            updates["due"] = due or None
+        with self._tx() as conn:
+            cur = conn.execute(
+                "INSERT INTO recruiter_event (recruiter_id, kind, company, title, job_id, body, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (recruiter_id, kind, company, title, job_id, body, now),
+            )
+            conn.execute(
+                f"UPDATE recruiter SET {', '.join(f'{k} = ?' for k in updates)} WHERE id = ?",
+                [*updates.values(), recruiter_id],
+            )
+            return int(cur.lastrowid)
+
+    def recruiter_events(self, recruiter_id: int) -> list[sqlite3.Row]:
+        return list(self._conn.execute(
+            "SELECT * FROM recruiter_event WHERE recruiter_id = ? ORDER BY created_at, id",
+            (recruiter_id,),
+        ))
+
     def counts_by_status(self) -> dict[str, int]:
         rows = self._conn.execute(
             "SELECT status, COUNT(*) AS n FROM job GROUP BY status"

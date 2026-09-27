@@ -351,3 +351,58 @@ class TestEmptyResultsAreStored:
             )
             tracker.save_cv(job_id, "a.html", "a.pdf")
             assert tracker.get_job(job_id)["critique_json"] is None
+
+
+class TestRecruiters:
+    """Relationships with search firms, kept apart from roles."""
+
+    def _tracker(self):
+        from jobsearch.tracker import Tracker
+
+        return Tracker(":memory:")
+
+    def test_add_and_list(self):
+        t = self._tracker()
+        rid = t.add_recruiter("Search Co", name="Sam", specialism="data & AI, Benelux")
+        rows = t.list_recruiters()
+        assert [r["id"] for r in rows] == [rid]
+        assert rows[0]["status"] == "new" and rows[0]["last_contact"] is None
+
+    def test_contact_moves_last_contact_and_status_but_a_note_does_not(self):
+        t = self._tracker()
+        rid = t.add_recruiter("Search Co", name="Sam")
+        t.log_recruiter(rid, "note", "met at PyData")
+        assert t.get_recruiter(rid)["last_contact"] is None
+        assert t.get_recruiter(rid)["status"] == "new"
+        t.log_recruiter(rid, "call", "intro call", next_action="send profile", due="2026-10-01")
+        r = t.get_recruiter(rid)
+        assert r["last_contact"] and r["status"] == "contacted"
+        assert (r["next_action"], r["due"]) == ("send profile", "2026-10-01")
+
+    def test_a_pitch_can_link_a_tracked_job(self, posting):
+        tracker = self._tracker()
+        tracker.upsert_job(posting)
+        rid = tracker.add_recruiter("Search Co")
+        tracker.log_recruiter(rid, "pitch", company=posting.company, title=posting.title, job_id=posting.job_id[:12])
+        event = tracker.recruiter_events(rid)[-1]
+        assert event["job_id"] == posting.job_id and event["kind"] == "pitch"
+
+    def test_cold_lists_only_open_relationships_without_recent_contact(self):
+        t = self._tracker()
+        quiet = t.add_recruiter("Quiet Partners")
+        busy = t.add_recruiter("Busy Search")
+        closed = t.add_recruiter("Old Firm", status="closed")
+        t.log_recruiter(busy, "email", "sent profile")
+        cold = [r["id"] for r in t.list_recruiters(cold_days=30)]
+        assert quiet in cold and busy not in cold and closed not in cold
+
+    def test_bad_kind_and_status_are_refused(self):
+        import pytest
+        from jobsearch.tracker import TrackerError
+
+        t = self._tracker()
+        rid = t.add_recruiter("Search Co")
+        with pytest.raises(TrackerError):
+            t.log_recruiter(rid, "lunch")
+        with pytest.raises(TrackerError):
+            t.add_recruiter("X", status="warm")

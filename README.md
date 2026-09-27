@@ -559,6 +559,25 @@ extra `Jobs (jobsearch-agent)` sheet — into `output/`. It reads your file only
 to learn its header row, so a column you added is followed rather than
 overwritten, and **it refuses outright to write over your own tracker**.
 
+### `recruiter` — search firms and recruiters
+
+At director level many roles are filled through search firms before they are posted. The
+recruiter log keeps those relationships apart from roles: who covers what, when you last
+spoke, what they pitched, and who is going cold.
+
+```bash
+jobsearch recruiter add "Example Search" --name "Sam" --specialism "data & AI leadership, Benelux"
+jobsearch recruiter log 1 call "Intro call" --next "send profile" --due 2026-10-02
+jobsearch recruiter pitch 1 --company Adyen --title "Head of AI" --job adyen-head-of-ai-4eb0
+jobsearch recruiter list                 # most overdue first
+jobsearch recruiter list --cold 30       # open relationships with no contact in 30 days
+jobsearch recruiter show 1               # one recruiter and their history
+```
+
+Calls, emails, meetings, messages and pitches move "last contact" forward and lift a new
+recruiter to "contacted"; a `note` records something without counting as contact. A pitch can
+link a tracked job, so a role you already have shows who brought it.
+
 ### `attach-cv`
 
 ```bash
