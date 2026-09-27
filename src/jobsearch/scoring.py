@@ -96,8 +96,9 @@ def check_visa(posting: JobPosting, cfg: Config) -> ConstraintResult:
 
     A company with no NL entity is not automatically a fail: an employer of
     record that is itself an IND recognised sponsor can employ the candidate
-    with kennismigrant status (Deel Nederland B.V. and Velocity Global B.V. were
-    on the register on 2026-09-03). The filter therefore fails only where the posting
+    with kennismigrant status (Deel Nederland B.V., Velocity Global B.V. and
+    Shifter Verloning Nederland B.V. were on the register on 2026-09-03; the
+    candidate has worked through Shifter before). The filter therefore fails only where the posting
     *rules sponsorship out* or the board is flagged as a non-sponsor for a role
     that requires being in the Netherlands.
     """
