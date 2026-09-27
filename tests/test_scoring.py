@@ -212,6 +212,15 @@ class TestLocationConstraint:
         posting = make(location="Foster City, CA / Amsterdam, Netherlands")
         assert check_location(posting, cfg).verdict is Verdict.PASS
 
+    @pytest.mark.parametrize("location", ["Remote - United Kingdom", "London", "United Kingdom (Remote)"])
+    def test_uk_is_out_remote_included(self, cfg, location):
+        """No UK right to work, so a UK-remote role is not workable from Amsterdam."""
+        assert check_location(make(location=location), cfg).verdict is Verdict.FAIL
+
+    @pytest.mark.parametrize("location", ["London / Amsterdam", "Hybrid/Remote - Europe (incl. UK)"])
+    def test_uk_with_a_european_option_passes(self, cfg, location):
+        assert check_location(make(location=location), cfg).verdict is Verdict.PASS
+
     def test_short_patterns_match_on_word_boundaries(self, cfg):
         """A bare "nl" pattern must not match inside "Finland"."""
         result = check_location(make(location="Helsinki, Finland"), cfg)

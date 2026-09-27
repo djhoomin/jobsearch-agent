@@ -153,6 +153,8 @@ blocked_location_patterns = [
   "onsite in london", "on-site in london",
   # Added 2026-09-27: city names and abbreviations boards actually use.
   "nyc", "bay area", "santa clara", "foster city", "palo alto", "mountain view", "sunnyvale", "san jose", "san mateo", "redwood city", "redmond", "bellevue", "los angeles", "san diego", "chicago", "atlanta", "denver", "miami", "dallas", "houston", "raleigh", "pittsburgh", "toronto", "vancouver", "montreal", "pune", "hyderabad", "mumbai", "chennai", "gurugram", "gurgaon", "noida", "delhi", "sao paulo", "bogota", "riyadh", "doha", "abu dhabi", "china", "beijing", "shanghai", "shenzhen", "taiwan", "taipei",
+  # UK is out, remote included (DJ, 2026-09-27): no UK right to work. A European option alongside still passes.
+  "united kingdom", "uk", "england", "scotland", "wales", "london", "edinburgh", "manchester", "cambridge, uk", "bristol",
 ]
 # Travel cap is roughly monthly. Weekly-travel roles are out.
 travel_fail_patterns = [
