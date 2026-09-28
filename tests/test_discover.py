@@ -557,3 +557,34 @@ class TestMovedBoard:
             "jobs": [{"title": "Engineer", "jobUrl": "https://x/1"}]}})
         report = discover(cfg, fetcher=fetcher)
         assert any("HTTP 404" in e and 'ats = "ashby"' in e for e in report.errors)
+
+
+class TestLocationFilter:
+    """Out-of-region postings never reach the tracker."""
+
+    def _posting(self, location):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(company="X", title="Head of AI", url=f"https://x/{location}", location=location)
+
+    def test_keeps_workable_locations(self, cfg):
+        from jobsearch.discover import filter_locations
+
+        workable = ["Amsterdam", "Remote - Europe", "Netherlands (hybrid)", "Hoofddorp", "San Francisco or Remote (Europe)"]
+        kept, dropped = filter_locations([self._posting(loc) for loc in workable], cfg)
+        assert [p.location for p in kept] == workable
+        assert dropped == []
+
+    def test_drops_blocked_and_unmatched_cities(self, cfg):
+        from jobsearch.discover import filter_locations
+
+        outside = ["Remote - United States", "Bengaluru, India", "Krakow", "Ho Chi Minh"]
+        kept, dropped = filter_locations([self._posting(loc) for loc in outside], cfg)
+        assert kept == []
+        assert [p.location for p in dropped] == outside
+
+    def test_keeps_postings_without_a_location(self, cfg):
+        from jobsearch.discover import filter_locations
+
+        kept, dropped = filter_locations([self._posting("")], cfg)
+        assert len(kept) == 1 and dropped == []

@@ -35,6 +35,9 @@ class DiscoveryReport:
     #: Every job_id the boards returned this run, before title filtering. This
     #: is what "still listed" means; `postings` is only what also matched.
     seen_job_ids: set[str] = field(default_factory=set)
+    #: Postings that matched the title filter but sit outside the workable
+    #: locations, so they never reach the tracker.
+    location_dropped: list[JobPosting] = field(default_factory=list)
 
     def dedupe(self) -> "DiscoveryReport":
         seen: set[str] = set()
@@ -91,7 +94,35 @@ def discover(
     report.seen_job_ids = {p.job_id for p in report.postings}
     if apply_title_filter:
         report.postings = filter_postings(report.postings, cfg)
+    if cfg.section("discover").get("location_filter", True):
+        report.postings, report.location_dropped = filter_locations(report.postings, cfg)
     return report.dedupe()
+
+
+def filter_locations(
+    postings: list[JobPosting], cfg: Config
+) -> tuple[list[JobPosting], list[JobPosting]]:
+    """Split postings into (workable, out of region) before they are stored.
+
+    Scoring runs the same location check later, but only on roles someone
+    chooses to score, so without this every US or Krakow posting a board
+    returns sits in the tracker as "Not started". A posting is dropped when
+    the check fails outright, or when it states a location that matches none
+    of the allowed patterns (a bare "Krakow" or "Singapore"). A posting that
+    states no location is kept: missing information is not a mismatch.
+    """
+    from ..scoring import check_location  # scoring imports the Claude client; keep discover light
+    from ..models import Verdict
+
+    kept: list[JobPosting] = []
+    dropped: list[JobPosting] = []
+    for posting in postings:
+        verdict = check_location(posting, cfg).verdict
+        if verdict == Verdict.PASS or (verdict == Verdict.UNKNOWN and not posting.location.strip()):
+            kept.append(posting)
+        else:
+            dropped.append(posting)
+    return kept, dropped
 
 
 def _select_boards(
@@ -119,6 +150,7 @@ __all__ = [
     "clean_posting_url",
     "fetch_single_posting",
     "posting_from_page",
+    "filter_locations",
     "filter_postings",
     "strip_html",
     "title_matches",

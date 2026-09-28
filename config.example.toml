@@ -132,8 +132,11 @@ comp_fail_on_unknown = false
 allowed_location_patterns = [
   "amsterdam", "netherlands", "nl", "remote", "remote-eu", "remote europe",
   "emea", "europe", "hybrid", "utrecht", "eindhoven", "rotterdam", "delft",
-  "den haag", "the hague", "haarlem", "anywhere in europe",
+  "den haag", "the hague", "haarlem", "hoofddorp", "amstelveen", "schiphol",
+  "leiden", "hilversum", "nederland", "anywhere in europe",
 ]
+# Discovery drops title matches outside these locations before they reach the
+# tracker. Set to false under [discover] to store every title match instead.
 # Explicitly European anchors. ONLY these override a blocked location, so
 # "San Francisco or Remote (Europe)" survives while "Remote - United States"
 # does not. A bare "remote" is not an anchor: most remote roles are US-remote.

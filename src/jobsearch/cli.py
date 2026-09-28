@@ -94,8 +94,10 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
     report = discover(cfg, companies=companies, tiers=tiers)
     print(
         f"Checked {report.boards_checked} board(s): {report.raw_count} postings, "
-        f"{len(report.postings)} matched the title filter."
+        f"{len(report.postings)} matched the title and location filters."
     )
+    if report.location_dropped:
+        print(f"  {len(report.location_dropped)} title match(es) skipped as outside NL / remote-EU.")
     for error in report.errors:
         print(f"  ! {error}")
 
