@@ -38,6 +38,15 @@ SCOPES = [
 GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly"
 
 
+
+def drive_name(path: Path) -> str:
+    """Every tailored CV is now called DJ-Human-CV.pdf inside its role folder, so
+    Drive (one flat folder, no overwrite) gets 'Company - Role - DJ-Human-CV.pdf'."""
+    path = Path(path)
+    if path.parent.parent.parent.name == "applications":
+        return f"{path.parent.parent.name} - {path.parent.name} - {path.name}"
+    return path.name
+
 class GoogleSyncError(RuntimeError):
     """Google sync is unavailable, unconfigured, or failed."""
 
@@ -233,7 +242,7 @@ class GoogleSync:
         created = (
             service.files()
             .create(
-                body={"name": path.name, "parents": [self.ensure_folder()]},
+                body={"name": drive_name(path), "parents": [self.ensure_folder()]},
                 media_body=media,
                 fields="id,webViewLink",
             )

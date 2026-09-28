@@ -612,7 +612,9 @@ class Tracker:
         wrong on rows a sweep will not touch (dismissed or in-flight ones), and
         a wrong location is what makes a workable role look unworkable.
         """
-        allowed = {"warm_path", "next_action", "due", "notes", "location"}
+        # company and ind_sponsor too: a posting added from its URL takes the
+        # company name from the host ("awin"), and the sponsor state from nowhere.
+        allowed = {"warm_path", "next_action", "due", "notes", "location", "company", "ind_sponsor"}
         unknown = set(fields) - allowed
         if unknown:
             raise TrackerError(f"Cannot set unknown field(s): {', '.join(sorted(unknown))}")
@@ -623,6 +625,20 @@ class Tracker:
             conn.execute(
                 f"UPDATE job SET {assignments}, updated_at = ? WHERE job_id = ?",
                 [*fields.values(), _now(), job_id],
+            )
+
+    def set_output_paths(self, job_id: str, **paths: str | None) -> None:
+        """Record where a role's CV and letter files live after they move."""
+        allowed = {"cv_html_path", "cv_pdf_path", "letter_path"}
+        unknown = set(paths) - allowed
+        if unknown:
+            raise TrackerError(f"Cannot set unknown path field(s): {', '.join(sorted(unknown))}")
+        if not paths:
+            return
+        with self._tx() as conn:
+            conn.execute(
+                f"UPDATE job SET {', '.join(f'{k} = ?' for k in paths)}, updated_at = ? WHERE job_id = ?",
+                [*paths.values(), _now(), job_id],
             )
 
     # -- reporting ---------------------------------------------------------

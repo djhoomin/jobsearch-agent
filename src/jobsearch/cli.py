@@ -651,6 +651,63 @@ def cmd_recruiter(cfg: Config, args: argparse.Namespace) -> int:
         tracker.close()
 
 
+def cmd_tidy_outputs(cfg: Config, args: argparse.Namespace) -> int:
+    """Move each role's CV and letter into output/applications/<Company>/<Role - id>/."""
+    import shutil
+
+    from .letter import letter_path_for
+    from .tailor import cv_paths
+
+    tracker = _tracker(cfg)
+    moved = skipped = missing = kept = 0
+    try:
+        for row in tracker.list_jobs():
+            job_id = row["job_id"]
+            if not (row["cv_pdf_path"] or row["cv_html_path"] or row["letter_path"]):
+                continue
+            posting = tracker.get_posting(job_id)
+            html_new, pdf_new = cv_paths(cfg, posting)
+            letter_new = html_new.parent / letter_path_for(cfg, posting).name
+            updates: dict[str, str] = {}
+            for field, new in (("cv_html_path", html_new), ("cv_pdf_path", pdf_new), ("letter_path", letter_new)):
+                old = row[field]
+                if not old:
+                    continue
+                old_path = Path(old)
+                if not old_path.is_absolute():
+                    old_path = cfg.root / old_path
+                if old_path.resolve() == new.resolve():
+                    continue
+                # Only files the tool wrote. A CV attached from elsewhere (the base
+                # CV, one tailored by hand) stays where it is.
+                if cfg.output_dir.resolve() not in old_path.resolve().parents:
+                    kept += 1
+                    print(f"  kept     {job_id}: {old_path.name} (outside the output folder)")
+                    continue
+                if not old_path.is_file():
+                    missing += 1
+                    print(f"  missing  {job_id}: {old}")
+                    continue
+                if new.exists():
+                    skipped += 1
+                    print(f"  exists   {new}")
+                    continue
+                print(f"  {'would move' if args.dry_run else 'move'}  {old_path.name}  ->  {new.relative_to(cfg.output_dir)}")
+                if not args.dry_run:
+                    new.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(old_path), str(new))
+                    updates[field] = str(new)
+                moved += 1
+            if updates:
+                tracker.set_output_paths(job_id, **updates)
+        verb = "would move" if args.dry_run else "moved"
+        print(f"{verb} {moved} file(s); {kept} kept outside the output folder; "
+              f"{skipped} already in place; {missing} missing on disk")
+        return 0
+    finally:
+        tracker.close()
+
+
 def cmd_show(cfg: Config, args: argparse.Namespace) -> int:
     tracker = _tracker(cfg)
     try:
@@ -1188,6 +1245,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.set_defaults(func=cmd_tui)
+
+    # tidy-outputs
+    p = sub.add_parser(
+        "tidy-outputs",
+        help="Move tailored CVs and letters into one folder per company and role",
+        description="Moves each role's files to output/applications/<Company>/<Role - id>/ as "
+        "<Name>-CV.pdf and <Name>-Cover-Letter.txt, and updates the tracker. Use --dry-run first.",
+    )
+    p.set_defaults(func=cmd_tidy_outputs)
 
     # recruiter
     p = sub.add_parser(

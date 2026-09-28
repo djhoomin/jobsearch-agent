@@ -559,6 +559,24 @@ extra `Jobs (jobsearch-agent)` sheet — into `output/`. It reads your file only
 to learn its header row, so a column you added is followed rather than
 overwritten, and **it refuses outright to write over your own tracker**.
 
+### Where files go
+
+Each application gets its own folder:
+
+```
+output/applications/<Company>/<Role title> - <id>/
+    DJ-Human-CV.pdf        # the name a recruiter sees; attach this as-is
+    DJ-Human-CV.html
+    DJ-Human-Cover-Letter.txt
+```
+
+The file name comes from `[candidate] name` (a nickname in brackets wins: "Dirk Johannes (DJ)
+Human" gives `DJ-Human`), or set `[candidate] file_name` yourself. The short id keeps two
+same-titled roles at one company apart. Drive uploads are named `Company - Role - DJ-Human-CV.pdf`
+so they stay distinct in one folder. `jobsearch --dry-run tidy-outputs` shows how older files
+would move into this layout; without `--dry-run` it moves them and updates the tracker. Files
+outside the output folder (a base CV you attached, one tailored by hand) are never moved.
+
 ### `recruiter` — search firms and recruiters
 
 At director level many roles are filled through search firms before they are posted. The

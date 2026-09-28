@@ -556,6 +556,56 @@ def output_stem(posting: JobPosting) -> str:
     return f"DJ_Human_CV_{role_slug(posting)}"
 
 
+_UNSAFE_PATH = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def _folder_name(text: str, fallback: str) -> str:
+    """Readable and safe on macOS, Windows and Drive: no slashes, colons or quotes."""
+    clean = _UNSAFE_PATH.sub("-", text or "").strip(" .-")
+    clean = re.sub(r"\s+", " ", clean)
+    return clean[:80].rstrip(" .-") or fallback
+
+
+def candidate_file_name(cfg: Any) -> str:
+    """'DJ-Human' from 'Dirk Johannes (DJ) Human': the name a recruiter should see.
+
+    A nickname in brackets wins over the first name, because that is the name
+    the candidate goes by. ``[candidate] file_name`` overrides the derivation.
+    """
+    section = cfg.section("candidate") if hasattr(cfg, "section") else {}
+    explicit = str(section.get("file_name", "") or "").strip()
+    if explicit:
+        return explicit
+    name = str(section.get("name", "") or "").strip()
+    nick = re.search(r"\(([^)]+)\)", name)
+    words = re.sub(r"\([^)]*\)", " ", name).split()
+    if not words:
+        return "CV"
+    first = nick.group(1).strip() if nick else words[0]
+    parts = [first, words[-1]] if len(words) > 1 or nick else [first]
+    return "-".join(re.sub(r"[^A-Za-z0-9]+", "", p) for p in parts if p) or "CV"
+
+
+def application_dir(cfg: Any, posting: JobPosting) -> Path:
+    """``output/applications/<Company>/<Role title> - <id>``, one folder per application.
+
+    The short id from the job id keeps two same-titled roles at one company in
+    separate folders (Databricks lists the same title in several cities).
+    """
+    job_id = posting.job_id or make_job_id(posting.company, posting.title, posting.url)
+    suffix = job_id.rsplit("-", 1)[-1]
+    company = _folder_name(posting.company, "Company")
+    role = f"{_folder_name(posting.title, 'Role')} - {suffix}"
+    return cfg.ensure_output_dir() / "applications" / company / role
+
+
+def cv_paths(cfg: Any, posting: JobPosting) -> tuple[Path, Path]:
+    """(html, pdf) for a role's tailored CV, named the way a recruiter should see it."""
+    folder = application_dir(cfg, posting)
+    stem = f"{candidate_file_name(cfg)}-CV"
+    return folder / f"{stem}.html", folder / f"{stem}.pdf"
+
+
 # ---------------------------------------------------------------------------
 # The stage
 # ---------------------------------------------------------------------------
@@ -731,11 +781,8 @@ def _tailor_once(
     on_delta: Callable[[str], None] | None = None,
 ) -> TailorResult:
     """Generate, harden, render and ground-check a tailored CV. One pass."""
-    out_dir = cfg.ensure_output_dir() / "cv"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = output_stem(posting)
-    html_path = out_dir / f"{stem}.html"
-    pdf_path = out_dir / f"{stem}.pdf"
+    html_path, pdf_path = cv_paths(cfg, posting)
+    html_path.parent.mkdir(parents=True, exist_ok=True)
 
     stable = stable_context_for(cfg)
 
@@ -996,6 +1043,9 @@ __all__ = [
     "harden_html",
     "html_to_text",
     "output_stem",
+    "application_dir",
+    "candidate_file_name",
+    "cv_paths",
     "strip_code_fences",
     "tailor_cv",
 ]

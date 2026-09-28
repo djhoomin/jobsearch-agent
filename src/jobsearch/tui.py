@@ -653,11 +653,13 @@ def candidate_cv_files(cfg: Config) -> list[Path]:
     Sorted newest first, because the one you just made is the one you want.
     """
     seen: dict[Path, float] = {}
-    for folder in (cfg.base_cv.parent, cfg.output_dir / "cv", cfg.output_dir):
+    folders = [(cfg.base_cv.parent, "glob"), (cfg.output_dir / "cv", "glob"),
+               (cfg.output_dir, "glob"), (cfg.output_dir / "applications", "rglob")]
+    for folder, how in folders:
         if not folder.is_dir():
             continue
         for pattern in ("*.pdf", "*.html"):
-            for path in folder.glob(pattern):
+            for path in getattr(folder, how)(pattern):
                 if path.is_file() and not path.name.startswith("."):
                     seen[path.resolve()] = path.stat().st_mtime
     return sorted(seen, key=lambda p: -seen[p])

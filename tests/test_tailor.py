@@ -116,7 +116,8 @@ class TestTailorStage:
     def test_writes_html_and_reports_ungrounded_claims(self, cfg, wired, posting):
         result = tailor_cv(posting, cfg, wired, render=False)
         assert result.html_path.endswith(".html")
-        assert "DJ_Human_CV_Weaviate" in result.html_path
+        assert "/applications/Weaviate/" in result.html_path
+        assert result.html_path.endswith("-CV.html")
         assert len(result.claims) == 2
         assert len(result.ungrounded) == 1
         assert result.ungrounded[0].severity == "block"
@@ -476,10 +477,10 @@ class TestFilenamesAreUniquePerRole:
 
     def test_letters_and_cvs_use_the_same_discriminator(self, cfg):
         from jobsearch.letter import letter_path_for
-        from jobsearch.tailor import role_slug
-
         posting = self._posting("Manager, FDE", "Amsterdam", "db-manager-4597")
-        assert role_slug(posting) in letter_path_for(cfg, posting).name
+        other = self._posting("Manager, FDE", "Tokyo", "db-manager-9999")
+        assert letter_path_for(cfg, posting).parent != letter_path_for(cfg, other).parent
+        assert letter_path_for(cfg, posting).parent.name.endswith("- 4597")
 
     def test_the_name_stays_readable(self):
         from jobsearch.tailor import output_stem
@@ -994,3 +995,37 @@ def test_ensure_contact_lines_without_block_reports_and_keeps_html():
 def test_ensure_contact_lines_no_values_is_a_no_op():
     html, notes = ensure_contact_lines(_CONTACT_HTML, [("Website", "")])
     assert (html, notes) == (_CONTACT_HTML, [])
+
+
+class TestApplicationFolders:
+    """One folder per company and role; the CV inside carries the candidate's name."""
+
+    def test_nickname_in_brackets_wins(self):
+        from types import SimpleNamespace
+
+        from jobsearch.tailor import candidate_file_name
+
+        cfg = SimpleNamespace(section=lambda s: {"name": "Dirk Johannes (DJ) Human"})
+        assert candidate_file_name(cfg) == "DJ-Human"
+        cfg = SimpleNamespace(section=lambda s: {"name": "Ada Lovelace"})
+        assert candidate_file_name(cfg) == "Ada-Lovelace"
+        cfg = SimpleNamespace(section=lambda s: {"name": "Ada Lovelace", "file_name": "A-Lovelace"})
+        assert candidate_file_name(cfg) == "A-Lovelace"
+
+    def test_cv_paths_use_company_and_role_folders(self, cfg):
+        from jobsearch.models import JobPosting
+        from jobsearch.tailor import cv_paths
+
+        posting = JobPosting(company="Awin", title="Head of Product, AI Enablement (f/m/d)",
+                             url="https://x.test/a", job_id="awin-head-000a")
+        html, pdf = cv_paths(cfg, posting)
+        assert pdf.parent.parent.name == "Awin"
+        assert pdf.parent.name == "Head of Product, AI Enablement (f-m-d) - 000a"
+        assert pdf.name.endswith("-CV.pdf") and html.parent == pdf.parent
+
+    def test_drive_gets_a_unique_display_name(self, tmp_path):
+        from jobsearch.sync.google import drive_name
+
+        pdf = tmp_path / "applications" / "Awin" / "Head of Product - 000a" / "DJ-Human-CV.pdf"
+        assert drive_name(pdf) == "Awin - Head of Product - 000a - DJ-Human-CV.pdf"
+        assert drive_name(tmp_path / "old.pdf") == "old.pdf"

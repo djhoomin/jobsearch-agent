@@ -18,7 +18,7 @@ from pathlib import Path
 from .claude import ClaudeClient, stable_context_for
 from .config import Config
 from .models import Claim, JobPosting
-from .tailor import ground_claims, normalise_dashes, role_slug
+from .tailor import application_dir, candidate_file_name, ground_claims, normalise_dashes, role_slug
 
 log = logging.getLogger(__name__)
 
@@ -106,11 +106,11 @@ class LetterResult:
 def letter_path_for(cfg: Config, posting: JobPosting) -> Path:
     """Where this role's letter lives.
 
-    Named for what it is. `output_stem` produces a CV filename, and a cover
-    letter called DJ_Human_CV_Databricks.txt is the kind of thing that ends up
-    attached to the wrong field of an application form.
+    Named for what it is, next to the CV in the role's application folder: a
+    cover letter called DJ_Human_CV_Databricks.txt is the kind of thing that
+    ends up attached to the wrong field of an application form.
     """
-    return cfg.ensure_output_dir() / "letters" / f"Cover_Letter_{role_slug(posting)}.txt"
+    return application_dir(cfg, posting) / f"{candidate_file_name(cfg)}-Cover-Letter.txt"
 
 
 def strip_stray_markdown(text: str) -> str:
