@@ -1837,6 +1837,29 @@ class TestBulkScoring:
         message = score_many_blocking(cfg, [blocked], dry_run=True)
         assert "1 eliminated" in message
 
+    def test_jev_triage_parks_low_roles_and_scores_the_rest(self, cfg, monkeypatch):
+        """Below the threshold a role never reaches the scorer."""
+        from jobsearch import tui
+
+        low = seed(cfg, company="Low Co", title="Account Executive")
+        high = seed(cfg, company="High Co", title="Head of AI")
+        probs = {"Low Co": 0.1, "High Co": 0.9}
+        monkeypatch.setattr(tui, "_triage_gate", lambda cfg, dry_run=False: (lambda p: probs[p.company], 0.3))
+        message = tui.score_many_blocking(cfg, [low, high], dry_run=True)
+        assert "1 scored" in message
+        assert "1 parked by Jev triage" in message
+
+    def test_a_jev_outage_scores_everything(self, cfg, monkeypatch):
+        from jobsearch import tui
+
+        def down(posting):
+            raise TimeoutError("jev down")
+
+        ids = [seed(cfg, company="A Co"), seed(cfg, company="B Co", title="X")]
+        monkeypatch.setattr(tui, "_triage_gate", lambda cfg, dry_run=False: (down, 0.3))
+        message = tui.score_many_blocking(cfg, ids, dry_run=True)
+        assert "2 scored" in message and "triage" not in message
+
     def test_capital_s_asks_before_spending(self, cfg):
         seed(cfg)
 

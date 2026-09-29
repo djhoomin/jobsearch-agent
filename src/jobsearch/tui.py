@@ -2379,8 +2379,9 @@ def score_many_blocking(
     from .tracker import Tracker
 
     client = make_client(cfg, dry_run=dry_run)
-    scored = eliminated = failed = 0
+    scored = eliminated = failed = triaged = 0
     total = len(job_ids)
+    triage, threshold = _triage_gate(cfg, dry_run=dry_run)
 
     with Tracker.from_config(cfg) as tracker:
         for index, job_id in enumerate(job_ids, start=1):
@@ -2392,6 +2393,17 @@ def score_many_blocking(
             company = str(_get(tracker.get_job(job_id), "company", job_id))
             try:
                 posting = tracker.get_posting(job_id)
+                p_pursue = _triage(triage, posting)
+                if p_pursue is not None and p_pursue < threshold:
+                    from .models import Status
+
+                    if not dry_run:
+                        tracker.set_status(job_id, Status.PARKED,
+                                           f"Jev triage: p(pursue)={p_pursue:.2f} below {threshold:.2f}, not scored")
+                    triaged += 1
+                    if on_progress is not None:
+                        on_progress(index, total, f"{company}: triaged out ({p_pursue:.2f})")
+                    continue
                 report = score_posting(posting, cfg, client)
                 if not dry_run:
                     tracker.save_score(report)
@@ -2408,9 +2420,36 @@ def score_many_blocking(
                 on_progress(index, total, f"{company}: {note}")
 
     parts = [f"[b]{scored} scored[/]", f"{eliminated} eliminated by a hard constraint"]
+    if triaged:
+        parts.append(f"{triaged} parked by Jev triage")
     if failed:
         parts.append(f"[red]{failed} failed[/]")
     return f"batch of {total}: " + ", ".join(parts)
+
+
+def _triage_gate(cfg: Config, *, dry_run: bool = False) -> tuple[Any, float]:
+    """Jev's triage reader and threshold for batch scoring, or (None, 0) when off.
+
+    Only batches go through the gate: scoring one role you picked by hand
+    always runs the full scorer.
+    """
+    from .systemone import SystemOneSettings, triage_reader_for
+
+    section = cfg.section("systemone")
+    if dry_run or not section.get("triage", False):
+        return None, 0.0
+    reader = triage_reader_for(SystemOneSettings.from_config(cfg), str(section.get("triage_profile", "")))
+    return reader, float(section.get("triage_threshold", 0.3))
+
+
+def _triage(reader: Any, posting: Any) -> float | None:
+    """p(pursue), or None when there is no gate or Jev fails (then the role is scored)."""
+    if reader is None:
+        return None
+    try:
+        return reader(posting)
+    except Exception:  # noqa: BLE001 - a Jev outage must never stop scoring
+        return None
 
 
 def load_notes(tracker: Any, job_id: str) -> list[str]:

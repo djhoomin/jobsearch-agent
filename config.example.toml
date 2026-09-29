@@ -88,6 +88,11 @@ pass_below = 0.2
 # A PASS the code reached by lookup (an IND-listed employer) is kept, but gets
 # a CHECK line when the posting text argues against it at or above flag_above.
 flag_above = 0.7
+# Batch scoring asks Jev for p(apply or network_in) first and parks roles below the
+# threshold. Describe the candidate in a sentence or two; never paste the dossier.
+triage = false
+triage_threshold = 0.3
+triage_profile = ""
 
 [candidate]
 name = "Your Name"

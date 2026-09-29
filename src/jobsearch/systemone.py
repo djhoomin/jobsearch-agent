@@ -100,8 +100,8 @@ NOULS: dict[str, Question] = {
 #: Discovery asks a different location question from scoring. "Impossible from
 #: the Netherlands or remote within Europe" treats on-site Krakow as fine,
 #: because Krakow is in Europe; at scoring the code catches that, at discovery
-#: nothing else does. Tested on 125 unclassified locations (2026-09-29), this
-#: wording separated on-site elsewhere from remote-with-NL; the other did not.
+#: nothing else does. On real unclassified locations this wording separated
+#: on-site elsewhere from remote-with-NL, and the scoring question did not.
 WORKABLE_FROM_AMSTERDAM = Question(
     constraint="location",
     meaning="someone living in Amsterdam could do this job without relocating",
@@ -287,3 +287,50 @@ def refine_constraints(
 
 def _warn(message: str) -> None:
     print(message, file=sys.stderr)
+
+# ---------------------------------------------------------------------------
+# Triage gate for batch scoring
+# ---------------------------------------------------------------------------
+
+TRIAGE_CRITERIA = {
+    "apply": "Strong fit on seniority, company and domain; apply directly.",
+    "network_in": (
+        "Promising, or a strong senior individual-contributor role at an AI-native or "
+        "AI-platform company; worth a warm path or an application."
+    ),
+    "park": "Marginal; keep on the list, do nothing now.",
+    "pass": "Wrong seniority (junior, or unrelated to AI), wrong location, or wrong company; drop it.",
+}
+
+TriageReader = Callable[[JobPosting], float]
+
+
+def triage_reader_for(settings: SystemOneSettings, profile: str) -> TriageReader | None:
+    """p(pursue) = p(apply) + p(network_in), from posting text and a short profile.
+
+    The first version of the question pushed strong senior-IC roles to "pass" where
+    the scorer said "network_in", so the
+    network_in criterion now names them. The profile comes from config, never
+    from the dossier.
+    """
+    if not settings.enabled or not settings.api_key or not profile.strip():
+        return None
+    try:
+        from typesafe_sdk import Choice, TypeSafeClient
+    except ImportError:
+        _warn("[systemone] enabled but typesafe-sdk is not installed; pip install -e '.[systemone]'")
+        return None
+    questions = {
+        "recommendation": Choice(
+            instructions=profile.strip() + " Which action should the candidate take on this posting?",
+            criteria=TRIAGE_CRITERIA,
+        )
+    }
+    client = TypeSafeClient(api_key=settings.api_key, model=settings.model, timeout=settings.timeout)
+
+    def read(posting: JobPosting) -> float:
+        probs = client.system_one(state=posting_state(posting, settings), questions=questions)
+        dist = probs.answers["recommendation"].probabilities
+        return float(dist.get("apply", 0.0)) + float(dist.get("network_in", 0.0))
+
+    return read
