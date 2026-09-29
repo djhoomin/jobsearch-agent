@@ -588,3 +588,38 @@ class TestLocationFilter:
 
         kept, dropped = filter_locations([self._posting("")], cfg)
         assert len(kept) == 1 and dropped == []
+
+
+class TestJevLocation:
+    """Jev decides only what the code could not classify."""
+
+    def _posting(self, location):
+        from jobsearch.models import JobPosting
+
+        return JobPosting(company="X", title="Head of AI", url=f"https://x/{location}", location=location)
+
+    def test_unknown_locations_follow_jev(self, cfg):
+        from jobsearch.discover import filter_locations
+
+        probs = {"Krakow": 0.05, "Global": 0.9, "Stockholm HQ": 0.5}  # p(workable from Amsterdam)
+        asked = []
+
+        def reader(posting):
+            asked.append(posting.location)
+            return probs[posting.location]
+
+        postings = [self._posting(loc) for loc in ("Amsterdam", "Remote - US", "Krakow", "Global", "Stockholm HQ")]
+        kept, dropped = filter_locations(postings, cfg, location_reader=reader)
+        assert [p.location for p in kept] == ["Amsterdam", "Global", "Stockholm HQ"]
+        assert [p.location for p in dropped] == ["Remote - US", "Krakow"]
+        assert asked == ["Krakow", "Global", "Stockholm HQ"]  # code verdicts never go to Jev
+        assert kept[1].raw["jev_workable_from_amsterdam"] == 0.9
+
+    def test_a_failing_reader_falls_back_to_dropping(self, cfg):
+        from jobsearch.discover import filter_locations
+
+        def reader(posting):
+            raise TimeoutError("jev down")
+
+        kept, dropped = filter_locations([self._posting("Krakow")], cfg, location_reader=reader)
+        assert kept == [] and len(dropped) == 1

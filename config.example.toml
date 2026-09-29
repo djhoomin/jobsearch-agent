@@ -159,6 +159,8 @@ blocked_location_patterns = [
   # UK is out, remote included (DJ, 2026-09-27): no UK right to work. A European option alongside still passes.
   "united kingdom", "uk", "england", "scotland", "wales", "london", "edinburgh", "manchester", "cambridge, uk", "bristol",
   "amer", "americas", "north america",
+  # Added 2026-09-29: bare "US" ("Remote - US") and Bangalore slipped through.
+  "us", "u.s.", "bangalore",
 ]
 # Travel cap is roughly monthly. Weekly-travel roles are out.
 travel_fail_patterns = [

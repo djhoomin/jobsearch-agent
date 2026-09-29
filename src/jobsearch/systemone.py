@@ -97,6 +97,31 @@ NOULS: dict[str, Question] = {
     ),
 }
 
+#: Discovery asks a different location question from scoring. "Impossible from
+#: the Netherlands or remote within Europe" treats on-site Krakow as fine,
+#: because Krakow is in Europe; at scoring the code catches that, at discovery
+#: nothing else does. Tested on 125 unclassified locations (2026-09-29), this
+#: wording separated on-site elsewhere from remote-with-NL; the other did not.
+WORKABLE_FROM_AMSTERDAM = Question(
+    constraint="location",
+    meaning="someone living in Amsterdam could do this job without relocating",
+    instructions=(
+        "Could someone who lives in Amsterdam and will not relocate do this job, "
+        "either from an office in the Netherlands or fully remote?"
+    ),
+    criteria={
+        "true": (
+            "The role is based in the Netherlands, or is remote and open to people in the "
+            "Netherlands (e.g. 'remote, Europe', 'anywhere in EMEA', 'CET timezone')."
+        ),
+        "false": (
+            "The role is on-site or hybrid in a city outside the Netherlands, or remote only "
+            "within specific countries that do not include the Netherlands, or restricted to "
+            "a non-European country."
+        ),
+    },
+)
+
 Reader = Callable[[JobPosting], "dict[str, float] | None"]
 
 
@@ -160,6 +185,34 @@ def reader_for(settings: SystemOneSettings) -> Reader | None:
     def read(posting: JobPosting) -> dict[str, float] | None:
         response = client.system_one(state=posting_state(posting, settings), questions=questions)
         return {name: float(response.answers[name].noul) for name in NOULS}
+
+    return read
+
+
+LocationReader = Callable[[JobPosting], float]
+
+
+def location_reader_for(settings: SystemOneSettings) -> LocationReader | None:
+    """Ask only whether the role is workable from Amsterdam: discovery's one question.
+
+    Discovery sees hundreds of postings a run, so it asks Jev about the few
+    whose location the code could not classify, and nothing else.
+    """
+    if not settings.enabled or not settings.api_key:
+        return None
+    try:
+        from typesafe_sdk import Noul, TypeSafeClient
+    except ImportError:
+        _warn("[systemone] enabled but typesafe-sdk is not installed; pip install -e '.[systemone]'")
+        return None
+    q = WORKABLE_FROM_AMSTERDAM
+    questions = {"workable": Noul(instructions=q.instructions, criteria=q.criteria)}
+    client = TypeSafeClient(api_key=settings.api_key, model=settings.model, timeout=settings.timeout)
+
+    def read(posting: JobPosting) -> float:
+        """Probability that the role is workable from Amsterdam."""
+        response = client.system_one(state=posting_state(posting, settings), questions=questions)
+        return float(response.answers["workable"].noul)
 
     return read
 

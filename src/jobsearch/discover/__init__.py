@@ -100,19 +100,29 @@ def discover(
 
 
 def filter_locations(
-    postings: list[JobPosting], cfg: Config
+    postings: list[JobPosting], cfg: Config, *, location_reader=None
 ) -> tuple[list[JobPosting], list[JobPosting]]:
     """Split postings into (workable, out of region) before they are stored.
 
     Scoring runs the same location check later, but only on roles someone
     chooses to score, so without this every US or Krakow posting a board
-    returns sits in the tracker as "Not started". A posting is dropped when
-    the check fails outright, or when it states a location that matches none
-    of the allowed patterns (a bare "Krakow" or "Singapore"). A posting that
-    states no location is kept: missing information is not a mismatch.
+    returns sits in the tracker as "Not started". A definite FAIL from the code
+    is dropped, a PASS is kept, and a posting that states no location is kept:
+    missing information is not a mismatch.
+
+    A location the code cannot classify (a bare "Krakow", "Global") goes to
+    Jev with one question, whether someone in Amsterdam could do the job
+    without relocating: dropped at or below ``pass_below``, kept above it (a
+    middling answer stays visible for a person to judge). Without Jev it is
+    dropped, as before. ``location_reader`` overrides the SDK (tests).
     """
     from ..scoring import check_location  # scoring imports the Claude client; keep discover light
     from ..models import Verdict
+    from ..systemone import SystemOneSettings, location_reader_for
+
+    settings = SystemOneSettings.from_config(cfg)
+    reader = location_reader if location_reader is not None else None
+    reader_ready = location_reader is not None
 
     kept: list[JobPosting] = []
     dropped: list[JobPosting] = []
@@ -120,10 +130,25 @@ def filter_locations(
         verdict = check_location(posting, cfg).verdict
         if verdict == Verdict.PASS or (verdict == Verdict.UNKNOWN and not posting.location.strip()):
             kept.append(posting)
-        else:
+            continue
+        if verdict == Verdict.FAIL:
             dropped.append(posting)
+            continue
+        if not reader_ready:
+            reader = location_reader_for(settings)
+            reader_ready = True
+        if reader is None:
+            dropped.append(posting)
+            continue
+        try:
+            p = reader(posting)
+        except Exception as exc:  # noqa: BLE001 - Jev refines, it never blocks discovery
+            log.warning("jev location check failed for %s: %s", posting.job_id, exc)
+            dropped.append(posting)
+            continue
+        posting.raw["jev_workable_from_amsterdam"] = round(p, 3)
+        (dropped if p <= settings.pass_below else kept).append(posting)
     return kept, dropped
-
 
 def _select_boards(
     cfg: Config, companies: list[str] | None, tiers: list[int] | None
