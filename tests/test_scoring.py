@@ -396,3 +396,20 @@ class TestDismissalIsReversible:
         block = source[source.index("TRANSITIONS"): source.index("def can_transition")]
         keys = re.findall(r"Status\.([A-Z_]+):", block)
         assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
+
+
+class TestMonthlySalaries:
+    """Dutch postings often state pay per month."""
+
+    def test_monthly_ranges_are_annualised(self):
+        from jobsearch.scoring import parse_salaries
+
+        assert parse_salaries("EUR 10,800 - 13,400 month") == [129_600, 160_800]
+        assert parse_salaries("€6.000 tot €8.000 per maand") == [72_000, 96_000]
+        assert parse_salaries("€ 7,500 per month gross") == [90_000]
+
+    def test_annual_figures_are_left_alone(self):
+        from jobsearch.scoring import parse_salaries
+
+        assert parse_salaries("EUR 90,000 - 110,000") == [90_000, 110_000]
+        assert parse_salaries("EUR 120,000 per year, reviewed every month") == [120_000]

@@ -182,6 +182,9 @@ _CURRENCY = re.compile(r"€|eur\b|\$|usd\b|£|gbp\b", re.IGNORECASE)
 #: A plausible salary figure: 90,000 / 90.000 / 90000 / 90k / 90K.
 _AMOUNT = re.compile(r"\b(\d{1,3}(?:[.,]\d{3})+|\d{2,3}\s?[kK]\b|\d{5,7})\b")
 
+#: A pay figure stated per month rather than per year.
+_MONTHLY = re.compile(r"\b(?:a|per|/|each)?\s*(?:month|monthly|mo\b|maand|p\.?m\.?\b)", re.IGNORECASE)
+
 #: What separates the two ends of a stated range.
 _RANGE_SEP = re.compile(r"^[\s]*(?:-|–|—|to|and|tot|up to|until|/)[\s]*$", re.IGNORECASE)
 
@@ -217,13 +220,23 @@ def parse_salaries(text: str) -> list[int]:
         anchored.append(bool(_CURRENCY.search(before) or _CURRENCY.search(after)))
         values.append(_amount_value(match.group(1)))
 
-    # Propagate anchoring across range separators, in both directions.
+    # A monthly figure ("EUR 10,800 - 13,400 month", "per maand") is annualised
+    # at 12x base, leaving out the Dutch holiday allowance, so the floor check
+    # stays conservative. The marker usually follows the range's second end.
+    monthly = [bool(_MONTHLY.search(text[m.end() : m.end() + 25])) for m in matches]
+
+    # Propagate anchoring and the monthly marker across range separators.
     for _ in range(2):
         for i in range(len(matches) - 1):
             gap = text[matches[i].end() : matches[i + 1].start()]
             if _RANGE_SEP.match(gap):
                 if anchored[i] or anchored[i + 1]:
                     anchored[i] = anchored[i + 1] = True
+                if monthly[i] or monthly[i + 1]:
+                    monthly[i] = monthly[i + 1] = True
+    # Only figures that could be a monthly wage: an annual 120,000 followed by
+    # "reviewed every month" must not become 1.44M.
+    values = [v * 12 if v is not None and m and v < 30_000 else v for v, m in zip(values, monthly)]
 
     found: list[int] = []
     for value, is_anchored in zip(values, anchored):
