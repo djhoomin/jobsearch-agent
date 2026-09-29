@@ -101,3 +101,22 @@ class TestRender:
         ], now=NOW).render()
         assert "DELISTED (1)" in out
         assert "Dead Role" in out
+
+
+class TestInFlightDelistings:
+    """A role vanishing after you applied is news, so it is noted, never withdrawn."""
+
+    def _row(self, job_id, company, status, seen):
+        return {"job_id": job_id, "company": company, "title": job_id, "status": status, "last_seen_at": seen}
+
+    def test_only_swept_in_flight_rows_with_a_sighting_count(self):
+        from jobsearch.stale import in_flight_delisted
+
+        rows = [
+            self._row("fresh", "A", "Not started", "2026-09-29T10:00:00+00:00"),
+            self._row("gone", "A", "Applied", "2026-09-20T10:00:00+00:00"),
+            self._row("live", "A", "Applied", "2026-09-29T09:00:00+00:00"),
+            self._row("old", "A", "Applied", None),
+            self._row("parked", "A", "Parked", "2026-09-01T10:00:00+00:00"),
+        ]
+        assert [r.job_id for r in in_flight_delisted(rows)] == ["gone"]

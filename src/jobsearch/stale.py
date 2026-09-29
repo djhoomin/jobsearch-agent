@@ -27,6 +27,13 @@ from typing import Any, Iterable
 #: information about your application, not clutter to be tidied away.
 REPORTABLE_STATUSES: frozenset[str] = frozenset({"Not started", "Parked"})
 
+#: Statuses where a delisting is news about the application: usually the role
+#: was filled or paused. These are never withdrawn; they get one dated note.
+IN_FLIGHT_STATUSES: frozenset[str] = frozenset(
+    {"Applied", "Outreach sent", "In conversation", "Interviewing", "Offer"}
+)
+DELISTED_NOTE_PREFIX = "Delisted:"
+
 
 @dataclass
 class StaleRow:
@@ -152,3 +159,34 @@ def find_stale(
         delisted=delisted,
         unknown=unknown,
     )
+
+
+def in_flight_delisted(rows: Iterable[Any], *, grace_hours: int = 36) -> list[StaleRow]:
+    """Roles you have applied to (or are talking about) that the board no longer lists.
+
+    Only rows with a recorded ``last_seen_at`` count: a row predating the column
+    proves nothing either way, and a note on it would be a false alarm.
+    """
+    report = find_stale(rows, grace_hours=grace_hours, statuses=IN_FLIGHT_STATUSES)
+    return [row for row in report.delisted if not row.never_seen]
+
+
+def note_in_flight_delistings(tracker: Any, *, grace_hours: int = 36) -> list[StaleRow]:
+    """Leave one dated note on each newly delisted in-flight role. Status is untouched.
+
+    Returns the rows that got a note this time. A role that reappears keeps its
+    note; the next delisting after that is not noted again, which errs towards
+    quiet over repetitive.
+    """
+    noted: list[StaleRow] = []
+    for row in in_flight_delisted(tracker.list_jobs(limit=100000), grace_hours=grace_hours):
+        if any(str(n["body"]).startswith(DELISTED_NOTE_PREFIX) for n in tracker.notes(row.job_id)):
+            continue
+        last = str(row.last_seen_at or "")[:10]
+        tracker.add_note(
+            row.job_id,
+            f"{DELISTED_NOTE_PREFIX} the board stopped listing this role (last seen {last}). "
+            "It may have been filled or paused; worth a status check.",
+        )
+        noted.append(row)
+    return noted

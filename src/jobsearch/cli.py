@@ -128,6 +128,10 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
         print(f"\n{new} new posting(s) added to {cfg.db_path}")
         if refreshed:
             print(f"{refreshed} tracked posting(s) confirmed still listed")
+        from .stale import note_in_flight_delistings
+
+        for row in note_in_flight_delistings(tracker):
+            print(f"  ! delisted after you applied: {row.company} - {row.title} ({row.status}); note added")
     finally:
         tracker.close()
     return 0
@@ -491,6 +495,14 @@ def cmd_stale(cfg: Config, args: argparse.Namespace) -> int:
             tracker.list_jobs(limit=100000), grace_hours=args.grace_hours
         )
         print(report.render())
+        from .stale import in_flight_delisted
+
+        gone = in_flight_delisted(tracker.list_jobs(limit=100000), grace_hours=args.grace_hours)
+        if gone:
+            print()
+            print(f"IN FLIGHT, NO LONGER LISTED ({len(gone)}): probably filled or paused; status left as is")
+            for row in sorted(gone, key=lambda r: (r.company, r.title)):
+                print(f"  [{row.days_unseen:>3}d unseen] {row.status:<15} {row.company} - {row.title[:52]}")
         if report.delisted:
             print()
             print(
