@@ -128,7 +128,14 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
         print(f"\n{new} new posting(s) added to {cfg.db_path}")
         if refreshed:
             print(f"{refreshed} tracked posting(s) confirmed still listed")
+        from .recheck import recheck_unswept
         from .stale import note_in_flight_delistings
+
+        checked = recheck_unswept(tracker, cfg)
+        if checked.listed or checked.gone or checked.unknown:
+            print(f"{len(checked.listed)} hand-added role(s) still listed at their own URL"
+                  + (f", {len(checked.gone)} gone" if checked.gone else "")
+                  + (f", {len(checked.unknown)} could not be checked" if checked.unknown else ""))
 
         for row in note_in_flight_delistings(tracker):
             print(f"  ! delisted after you applied: {row.company} - {row.title} ({row.status}); note added")

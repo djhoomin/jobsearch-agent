@@ -104,6 +104,14 @@ def _parse(value: Any) -> datetime | None:
         return None
 
 
+def _field(row: Any, key: str) -> Any:
+    """Row value that tolerates rows from before a column existed (tests, old dicts)."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def find_stale(
     rows: Iterable[Any],
     *,
@@ -142,6 +150,9 @@ def find_stale(
         company = str(row["company"] or "")
         seen = _parse(row["last_seen_at"])
         sweep = latest_by_company.get(company)
+        checked = _parse(_field(row, "last_checked_at"))
+        if checked is not None and (sweep is None or checked > sweep):
+            sweep = checked  # a role rechecked at its own URL (jobsearch.recheck)
         entry = StaleRow(
             job_id=str(row["job_id"]),
             company=company,

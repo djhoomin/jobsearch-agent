@@ -206,6 +206,9 @@ class Tracker:
         # swept recently look identical: both simply stop being refreshed, and
         # the row sits at Not started looking live indefinitely.
         ("job", "last_seen_at TEXT"),
+        # When a role with no swept board was last checked at its own URL
+        # (jobsearch.recheck). Gone = checked after it was last seen.
+        ("job", "last_checked_at TEXT"),
     )
 
     def _add_missing_columns(self) -> None:
@@ -237,6 +240,11 @@ class Tracker:
                 [(now, job_id) for job_id in ids],
             )
             return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+
+    def mark_checked(self, job_id: str) -> None:
+        """Record that a role's own URL was checked just now, listed or not."""
+        with self._tx() as conn:
+            conn.execute("UPDATE job SET last_checked_at=? WHERE job_id=?", (_now(), str(job_id)))
 
     def upsert_job(
         self, posting: JobPosting, status: Status = Status.NOT_STARTED

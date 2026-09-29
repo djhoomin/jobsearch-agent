@@ -75,17 +75,30 @@ def latest_sighting_by_company(rows: Sequence[Any]) -> dict[str, datetime]:
     return latest
 
 
-def listing_cell(row: Any, latest: dict[str, datetime], grace_hours: int = 36) -> str:
-    """✓ still on the board, "gone Nd" when a sweep missed it, · when unknown.
+def listing_cell(
+    row: Any, latest: dict[str, datetime], grace_hours: int = 36,
+    swept_companies: set[str] | None = None,
+) -> str:
+    """✓ still listed, "gone Nd" when a check missed it, · when unknown.
 
     Same rule as `jobsearch stale`: a row is gone only when its own company's
-    board was swept after it was last seen, so an unswept board never looks dead.
+    board was swept, or its own URL was checked, after it was last seen. A role
+    from a company with no board that has never been checked at its URL shows ·.
     """
     try:
         seen = datetime.fromisoformat(str(_get(row, "last_seen_at", "") or ""))
     except ValueError:
         return "[dim]·[/]"
-    sweep = latest.get(str(_get(row, "company", "")))
+    company = str(_get(row, "company", ""))
+    try:
+        checked = datetime.fromisoformat(str(_get(row, "last_checked_at", "") or ""))
+    except ValueError:
+        checked = None
+    if swept_companies is not None and company.strip().lower() not in swept_companies and checked is None:
+        return "[dim]·[/]"
+    sweep = latest.get(company)
+    if checked is not None and (sweep is None or checked > sweep):
+        sweep = checked
     if sweep is None or (sweep - seen).total_seconds() <= grace_hours * 3600:
         return "[green]✓[/]"
     days = (datetime.now(timezone.utc) - seen).days
@@ -1206,6 +1219,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
             with Tracker.from_config(self.cfg) as tracker:
                 rows = tracker.list_jobs()
             self.latest_sighting = latest_sighting_by_company(rows)
+            self.swept_companies = {b.company.strip().lower() for b in self.cfg.boards}
             self.outreach_ids = tracker_outreach_ids(self.cfg)
             self.hidden_count = sum(1 for r in rows if is_hidden(r, self.cfg))
             if not self.show_hidden:
@@ -1234,7 +1248,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                     location_cell(row, self.cfg),
                     "[green]✓[/]" if (_get(row, "cv_pdf_path") or _get(row, "cv_html_path")) else "[dim]·[/]",
                     "[green]✓[/]" if str(_get(row, "job_id", "")) in self.outreach_ids else "[dim]·[/]",
-                    listing_cell(row, self.latest_sighting),
+                    listing_cell(row, self.latest_sighting, swept_companies=self.swept_companies),
                     score_cell(row),
                     f"{status_glyph(str(_get(row, 'status', '')))} {_get(row, 'status', '')}",
                     label=str(index),
