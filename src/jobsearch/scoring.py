@@ -455,14 +455,25 @@ Score each of the five dimensions 1-5 using the rubric's own definitions:
 - buyer (20%): does the pain AND the budget sit with a business owner, with a
   concrete case? His whole pricing thesis is that value must land in a business
   P&L; he has watched the alternative fail from the vendor side twice.
-- role_fit (25%): altitude and shape. Primary archetype is Head/Director of AI
-  owning a research-to-product function. Secondary: AI-platform product-line
-  ownership, founding EMEA leadership, and SE/FDE leadership at major AI/data
-  platforms. Senior-IC roles are an altitude step DOWN from running a 10-person
-  research org and should score low. Does the role leave hands-on room?
-- company (25%): stage, founders, runway. Series B-D hypergrowth with revenue
-  and PMF scores highest. Pre-PMF labs and big-cog incumbents score low. Founder
-  quality is a first-class criterion, not a tiebreaker.
+- role_fit (25%): altitude and shape, against the strategy's archetypes (a) to
+  (f). Head/Director of AI owning a research-to-product function is the primary
+  one; AI-platform product-line ownership, founding EMEA leadership, SE/FDE
+  leadership at AI/data platforms, and senior AI leadership inside a regulated
+  incumbent are all in scope. A very senior IC seat (Staff, Principal, Lead,
+  Architect, Member of Technical Staff, senior FDE or applied AI engineer) at an
+  AI-native or AI-platform company is archetype (f) and scores on its merits,
+  not as a step down: score it well when it owns architecture or technical
+  direction and has a visible path to leadership or a bench worth learning
+  from, and low when it is a backlog seat or a Lead title with nobody senior
+  above it. Junior roles and frontline managers of a small team doing deal
+  support still score low. Does the role leave hands-on room?
+- company (25%): stage, founders, runway and stability. Series B-D
+  hypergrowth with revenue and PMF is the default best case, and pre-PMF labs
+  still score low. Stability is a first-class input: a profitable established
+  company or a large incumbent with a Dutch entity that is an IND-recognised
+  sponsor, and that will plausibly still be paying him in three years, scores
+  well on that alone; do not mark a company down for being large or mature.
+  Founder quality is a first-class criterion, not a tiebreaker.
 - domain (15%): 1) sovereign/enterprise agentic AI for regulated industries,
   2) AI platform / agent infrastructure, 3) games/entertainment AI
   (opportunistic only). Score against that ranking plus any regulatory tailwind.
