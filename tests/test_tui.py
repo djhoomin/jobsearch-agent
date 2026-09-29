@@ -2067,3 +2067,20 @@ class TestRecruitersView:
                 assert any("overdue" in line for line in app.log_history)
 
         asyncio.run(scenario())
+
+
+class TestListedColumn:
+    def test_gone_only_when_its_own_board_was_swept_later(self):
+        from jobsearch.tui import latest_sighting_by_company, listing_cell
+
+        rows = [
+            {"company": "A", "last_seen_at": "2026-09-29T10:00:00+00:00"},
+            {"company": "A", "last_seen_at": "2026-09-20T10:00:00+00:00"},
+            {"company": "B", "last_seen_at": "2026-09-20T10:00:00+00:00"},
+            {"company": "C", "last_seen_at": None},
+        ]
+        latest = latest_sighting_by_company(rows)
+        assert "✓" in listing_cell(rows[0], latest)
+        assert "gone" in listing_cell(rows[1], latest)
+        assert "✓" in listing_cell(rows[2], latest)  # B not swept since: not evidence of anything
+        assert "·" in listing_cell(rows[3], latest)

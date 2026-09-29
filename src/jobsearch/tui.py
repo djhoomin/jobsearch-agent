@@ -61,6 +61,37 @@ def is_eliminated(row: Any) -> bool:
     return value is not None and not value
 
 
+def latest_sighting_by_company(rows: Sequence[Any]) -> dict[str, datetime]:
+    """Each company's most recent last_seen_at, i.e. when its board was last swept."""
+    latest: dict[str, datetime] = {}
+    for row in rows:
+        try:
+            seen = datetime.fromisoformat(str(_get(row, "last_seen_at", "") or ""))
+        except ValueError:
+            continue
+        company = str(_get(row, "company", ""))
+        if company not in latest or seen > latest[company]:
+            latest[company] = seen
+    return latest
+
+
+def listing_cell(row: Any, latest: dict[str, datetime], grace_hours: int = 36) -> str:
+    """✓ still on the board, "gone Nd" when a sweep missed it, · when unknown.
+
+    Same rule as `jobsearch stale`: a row is gone only when its own company's
+    board was swept after it was last seen, so an unswept board never looks dead.
+    """
+    try:
+        seen = datetime.fromisoformat(str(_get(row, "last_seen_at", "") or ""))
+    except ValueError:
+        return "[dim]·[/]"
+    sweep = latest.get(str(_get(row, "company", "")))
+    if sweep is None or (sweep - seen).total_seconds() <= grace_hours * 3600:
+        return "[green]✓[/]"
+    days = (datetime.now(timezone.utc) - seen).days
+    return f"[red]gone {days}d[/]"
+
+
 def score_cell(row: Any) -> str:
     """Render the weighted score, or why there isn't one."""
     if is_eliminated(row):
@@ -1149,7 +1180,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
         def on_mount(self) -> None:
             table = self.query_one("#table", DataTable)
-            table.add_columns("Company", "Title", "Location", "CV", "Out", "Score", "Status")
+            table.add_columns("Company", "Title", "Location", "CV", "Out", "Listed", "Score", "Status")
             # Row numbers live in the label gutter rather than a column, so
             # they cost no width and do not shift when columns resize.
             table.show_row_labels = True
@@ -1174,6 +1205,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
 
             with Tracker.from_config(self.cfg) as tracker:
                 rows = tracker.list_jobs()
+            self.latest_sighting = latest_sighting_by_company(rows)
             self.outreach_ids = tracker_outreach_ids(self.cfg)
             self.hidden_count = sum(1 for r in rows if is_hidden(r, self.cfg))
             if not self.show_hidden:
@@ -1202,6 +1234,7 @@ def build_app(cfg: Config, *, dry_run: bool = False) -> Any:
                     location_cell(row, self.cfg),
                     "[green]✓[/]" if (_get(row, "cv_pdf_path") or _get(row, "cv_html_path")) else "[dim]·[/]",
                     "[green]✓[/]" if str(_get(row, "job_id", "")) in self.outreach_ids else "[dim]·[/]",
+                    listing_cell(row, self.latest_sighting),
                     score_cell(row),
                     f"{status_glyph(str(_get(row, 'status', '')))} {_get(row, 'status', '')}",
                     label=str(index),
