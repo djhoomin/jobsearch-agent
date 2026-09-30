@@ -35,6 +35,9 @@ class DiscoveryReport:
     #: Every job_id the boards returned this run, before title filtering. This
     #: is what "still listed" means; `postings` is only what also matched.
     seen_job_ids: set[str] = field(default_factory=set)
+    #: Every posting URL the boards returned. A retitled posting keeps its URL
+    #: but gets a new job_id, so sightings are recorded by URL as well.
+    seen_urls: set[str] = field(default_factory=set)
     #: Postings that matched the title filter but sit outside the workable
     #: locations, so they never reach the tracker.
     location_dropped: list[JobPosting] = field(default_factory=list)
@@ -92,6 +95,7 @@ def discover(
     # filters": those are different facts, and conflating them reports a live
     # posting as delisted the moment the filters are tightened.
     report.seen_job_ids = {p.job_id for p in report.postings}
+    report.seen_urls = {p.url for p in report.postings if p.url}
     if apply_title_filter:
         report.postings = filter_postings(report.postings, cfg)
     if cfg.section("discover").get("location_filter", True):

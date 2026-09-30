@@ -241,6 +241,23 @@ class Tracker:
             )
             return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
 
+    def mark_seen_urls(self, urls: Iterable[str]) -> int:
+        """Record a sighting by posting URL, for rows whose job_id went stale.
+
+        A board that retitles a posting keeps the URL but changes the job_id
+        (which includes the title), so the original row would stop being seen
+        and look delisted while the role is still open.
+        """
+        found = [str(u) for u in urls if u]
+        if not found:
+            return 0
+        now = _now()
+        with self._tx() as conn:
+            cursor = conn.executemany(
+                "UPDATE job SET last_seen_at=? WHERE url=?", [(now, url) for url in found]
+            )
+            return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+
     def mark_checked(self, job_id: str) -> None:
         """Record that a role's own URL was checked just now, listed or not."""
         with self._tx() as conn:

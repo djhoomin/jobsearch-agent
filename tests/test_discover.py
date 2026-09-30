@@ -623,3 +623,20 @@ class TestJevLocation:
 
         kept, dropped = filter_locations([self._posting("Krakow")], cfg, location_reader=reader)
         assert kept == [] and len(dropped) == 1
+
+
+class TestSlowBoards:
+    def test_a_timeout_becomes_a_board_error(self, monkeypatch):
+        """A socket timeout mid-read must not abort the sweep."""
+        import urllib.request
+
+        import pytest
+
+        from jobsearch.discover.sources import DiscoveryError, Fetcher
+
+        def slow(*args, **kwargs):
+            raise TimeoutError("The read operation timed out")
+
+        monkeypatch.setattr(urllib.request, "urlopen", slow)
+        with pytest.raises(DiscoveryError, match="Timed out"):
+            Fetcher(rate_limit_seconds=0).get("https://boards-api.greenhouse.io/v1/boards/x/jobs", check_robots=False)

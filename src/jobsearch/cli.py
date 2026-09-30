@@ -125,6 +125,7 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
         # postings the title filter dropped. Otherwise tightening the filters
         # makes live roles look delisted.
         refreshed = tracker.mark_seen(getattr(report, "seen_job_ids", ()) or ())
+        tracker.mark_seen_urls(getattr(report, "seen_urls", ()) or ())
         print(f"\n{new} new posting(s) added to {cfg.db_path}")
         if refreshed:
             print(f"{refreshed} tracked posting(s) confirmed still listed")

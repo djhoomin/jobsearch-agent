@@ -406,3 +406,17 @@ class TestRecruiters:
             t.log_recruiter(rid, "lunch")
         with pytest.raises(TrackerError):
             t.add_recruiter("X", status="warm")
+
+
+def test_a_retitled_posting_is_still_seen_by_url(cfg):
+    """The job_id includes the title; the URL does not change when a board retitles."""
+    from jobsearch.models import JobPosting
+    from jobsearch.tracker import Tracker
+
+    with Tracker.from_config(cfg) as tracker:
+        old = JobPosting(company="X", title="Agent Runtime", url="https://jobs.example/1")
+        tracker.upsert_job(old)
+        tracker._conn.execute("UPDATE job SET last_seen_at='2026-01-01T00:00:00+00:00' WHERE job_id=?", (old.job_id,))
+        tracker._conn.commit()
+        assert tracker.mark_seen_urls(["https://jobs.example/1"]) == 1
+        assert not str(tracker.get_job(old.job_id)["last_seen_at"]).startswith("2026-01-01")

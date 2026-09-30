@@ -124,6 +124,10 @@ class Fetcher:
             raise DiscoveryError(f"HTTP {exc.code} from {url}") from exc
         except urllib.error.URLError as exc:
             raise DiscoveryError(f"Could not reach {url}: {exc.reason}") from exc
+        except (TimeoutError, OSError) as exc:
+            # A slow board raises TimeoutError (a socket timeout mid-read, not a
+            # URLError). Uncaught, one slow board aborted the whole sweep.
+            raise DiscoveryError(f"Timed out or dropped reading {url}: {exc}") from exc
 
     def get_json(self, url: str, check_robots: bool = True) -> Any:
         body = self.get(url, check_robots=check_robots)

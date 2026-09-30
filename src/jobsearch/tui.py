@@ -323,6 +323,15 @@ def scan_blocking(cfg: Config, tiers: list[int] | None = None) -> str:
                 continue
             tracker.upsert_job(posting)
             refreshed += 1
+        # Same bookkeeping as `jobsearch discover`: without it a TUI-only user's
+        # last_seen_at stops moving and the Listed column calls live roles gone.
+        from .recheck import recheck_unswept
+        from .stale import note_in_flight_delistings
+
+        tracker.mark_seen(getattr(report, "seen_job_ids", ()) or ())
+        tracker.mark_seen_urls(getattr(report, "seen_urls", ()) or ())
+        checked = recheck_unswept(tracker, cfg)
+        gone_after_applying = note_in_flight_delistings(tracker)
 
     parts = [
         f"{report.boards_checked} board(s), {report.raw_count} posting(s), "
@@ -335,7 +344,11 @@ def scan_blocking(cfg: Config, tiers: list[int] | None = None) -> str:
         parts.append(f"[dim]{dismissed} left dismissed[/]")
     if in_progress:
         parts.append(f"[dim]{in_progress} in progress, untouched[/]")
+    if checked.gone:
+        parts.append(f"[yellow]{len(checked.gone)} hand-added gone[/]")
     summary = "scan: " + "  ·  ".join(parts)
+    for row in gone_after_applying:
+        summary += f"\n  [red]![/] delisted after you applied: {row.company} - {row.title}"
     for error in report.errors[:5]:
         summary += f"\n  [yellow]![/] {error}"
     return summary
