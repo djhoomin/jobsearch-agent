@@ -20,8 +20,18 @@ from typing import Sequence
 
 DEFAULT_ARGS = ("--headless", "--disable-gpu", "--no-pdf-header-footer")
 
+#: The Chrome for Testing build the ATS verifier is calibrated against. Chrome
+#: 156 splits words in the PDF text layer and fails verification, so this build
+#: is tried first whenever no binary is configured.
+PINNED_CHROME = str(
+    Path.home()
+    / ".cache/chrome-for-testing/155.0.8059.84"
+    / "chrome-headless-shell-mac-arm64/chrome-headless-shell"
+)
+
 #: Tried in order when the configured binary is missing.
 FALLBACK_BINARIES = (
+    PINNED_CHROME,
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",

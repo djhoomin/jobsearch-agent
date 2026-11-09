@@ -219,6 +219,8 @@ min_keyword_coverage = 0.5
 
 [render]
 # Verified working on macOS. Override for Chromium/Brave/another OS.
+# Prefer the pinned Chrome for Testing 155 headless shell (see PINNED_CHROME in
+# src/jobsearch/render.py): PDFs from Chrome 156 fail ATS verification.
 chrome_binary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 chrome_args = ["--headless", "--disable-gpu", "--no-pdf-header-footer"]
 timeout_seconds = 120
