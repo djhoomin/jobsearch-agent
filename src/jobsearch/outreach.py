@@ -5,7 +5,7 @@ Instead it does the two things that are both legitimate and actually useful:
 
 * **Infers** who the right contact *role* is for this company and this posting
   (hiring manager title, VP Eng, Head of Talent, founder) and emits a LinkedIn
-  **search URL** the user clicks himself. A human opening a search page in a
+  **search URL** the user clicks themselves. A human opening a search page in a
   browser is normal use; a bot harvesting profiles is not.
 * **Drafts** a short personalised message grounded in the dossier and the
   specific posting - plus an email version - and prints them for the user to
@@ -31,7 +31,7 @@ def linkedin_search_url(company: str, title: str) -> str:
 
 
 OUTREACH_INSTRUCTIONS = """\
-You draft outreach for one specific person applying to one specific role. His
+You draft outreach for one specific person applying to one specific role. Their
 career dossier and CV are supplied below and never change.
 
 Produce:
@@ -49,7 +49,7 @@ Produce:
 
 How to write them:
 
-- Lead with the specific thing about THIS company that made him reach out - a
+- Lead with the specific thing about THIS company that made them reach out - a
   detail from the posting or the company notes, not a generality. If the notes
   say they bet the company on agents and have no AI leader, say that.
 - Follow with the single most relevant proof point from the dossier. One. The
@@ -57,7 +57,7 @@ How to write them:
 - Close with a low-friction ask: a 20-minute conversation, or a specific
   question. Never "I would love the opportunity to discuss how my skills...".
 - Sound like a director-level peer writing to another, not a candidate
-  petitioning. He is currently employed and choosing carefully.
+  petitioning. They are currently employed and choosing carefully.
 - No flattery, no superlatives, no "passionate about". No em dashes.
 - Respect the dossier's red-list: no revenue figures, no named pipeline
   companies, the semiconductor partner stays anonymous, no compensation talk.

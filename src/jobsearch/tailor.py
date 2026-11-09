@@ -67,8 +67,8 @@ FORBIDDEN_CSS = (
 
 
 TAILOR_INSTRUCTIONS = """\
-You tailor one specific person's CV to one specific job posting. His career
-dossier (the fact base) and his ATS-hardened base CV (the template) are supplied
+You tailor one specific person's CV to one specific job posting. Their career
+dossier (the fact base) and their ATS-hardened base CV (the template) are supplied
 below and never change.
 
 YOUR OUTPUT IS A COMPLETE HTML DOCUMENT. Nothing else - no markdown fences, no
@@ -82,14 +82,14 @@ title, employer, technology, team size, outcome - must be traceable to the
 career dossier or the base CV. You may:
   - reword, reorder, compress, and re-emphasise existing facts
   - promote a fact from the dossier that the base CV omitted
-  - adopt the posting's vocabulary for something he genuinely did
+  - adopt the posting's vocabulary for something they genuinely did
 You may NOT:
   - add a technology, tool, metric, employer, or responsibility that is not in
     the source documents
   - inflate a number, widen a scope, or convert "helped build" into "built"
   - state seniority, headcount, or budget figures not present in the sources
 If a job requirement is not met, leave it out. A gap is honest; an invention is
-disqualifying. Some of his strongest material is confidential: respect the
+disqualifying. Some of their strongest material is confidential: respect the
 dossier's red-list guardrails (no revenue figures, no named pipeline companies,
 the semiconductor partner stays anonymous, no compensation specifics).
 
@@ -172,7 +172,7 @@ Judge strictly:
     is NOT.
   - Any number, date, headcount, employer, job title, technology or named
     outcome that does not appear in the sources is `grounded: false`.
-  - A skill term is grounded if the sources show him doing that thing, even if
+  - A skill term is grounded if the sources show them doing that thing, even if
     the exact phrase differs. A skill term with no supporting activity is not.
   - Severity: "block" for an invented fact or inflated metric; "warn" for a
     claim that stretches the evidence or that a red-list guardrail covers;

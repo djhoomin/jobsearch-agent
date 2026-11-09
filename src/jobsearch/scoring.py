@@ -460,14 +460,14 @@ SCORE_SCHEMA: dict[str, Any] = {
 
 SCORING_INSTRUCTIONS = """\
 You are scoring one job posting against a specific person's job-search rubric.
-The rubric, his career dossier, and his current CV are supplied below and do not
+The rubric, their career dossier, and their current CV are supplied below and do not
 change between jobs.
 
 Score each of the five dimensions 1-5 using the rubric's own definitions:
 
 - buyer (20%): does the pain AND the budget sit with a business owner, with a
-  concrete case? His whole pricing thesis is that value must land in a business
-  P&L; he has watched the alternative fail from the vendor side twice.
+  concrete case? Their whole pricing thesis is that value must land in a business
+  P&L; they have watched the alternative fail from the vendor side twice.
 - role_fit (25%): altitude and shape, against the strategy's archetypes (a) to
   (f). Head/Director of AI owning a research-to-product function is the primary
   one; AI-platform product-line ownership, founding EMEA leadership, SE/FDE
@@ -484,21 +484,21 @@ Score each of the five dimensions 1-5 using the rubric's own definitions:
   hypergrowth with revenue and PMF is the default best case, and pre-PMF labs
   still score low. Stability is a first-class input: a profitable established
   company or a large incumbent with a Dutch entity that is an IND-recognised
-  sponsor, and that will plausibly still be paying him in three years, scores
+  sponsor, and that will plausibly still be paying them in three years, scores
   well on that alone; do not mark a company down for being large or mature.
   Founder quality is a first-class criterion, not a tiebreaker.
 - domain (15%): 1) sovereign/enterprise agentic AI for regulated industries,
   2) AI platform / agent infrastructure, 3) games/entertainment AI
   (opportunistic only). Score against that ranking plus any regulatory tailwind.
-- talent (15%): will he learn there? Are the best people builders, and do
-  builders lead? He has spent two years mostly being the teacher.
+- talent (15%): will they learn there? Are the best people builders, and do
+  builders lead? They have spent two years mostly being the teacher.
 
 Rules:
 - Ground every score in something the posting or the dossier actually says.
   Put the specific quote or fact in `evidence`. An empty evidence list means you
   are guessing; say so in `reasoning` and score conservatively.
 - Do not restate the rubric back. Reason about THIS company and THIS posting.
-- `notes` is for the one thing he should verify before spending time on it.
+- `notes` is for the one thing they should verify before spending time on it.
 - `open_questions` are the questions to ask on the first call.
 """
 

@@ -26,7 +26,7 @@ __all__ = ["LETTER_INSTRUCTIONS", "LetterResult", "write_letter", "letter_path_f
 
 LETTER_INSTRUCTIONS = """\
 You write one short cover letter for one specific job posting. The candidate's
-career dossier (the fact base) and his ATS-hardened base CV are supplied below.
+career dossier (the fact base) and their ATS-hardened base CV are supplied below.
 
 OUTPUT PLAIN TEXT. No markdown headings, no bullet list, no subject line, no
 commentary before or after. Start at the greeting and end at the sign-off.
