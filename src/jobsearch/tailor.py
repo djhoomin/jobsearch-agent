@@ -128,7 +128,8 @@ review of this CV.
 3. The leading HTML comment: "Tailored for: <Company> - <Title>. Base version:
    __BASE_CV_FILENAME__".
 4. Professional Summary: rewritten to lead with what THIS posting is buying.
-   Same facts, different order and emphasis.
+   Same facts, different order and emphasis. At most three printed lines,
+   about 300 characters: two sentences, no lists of countries or tools.
 5. Bullet emphasis and ordering: promote the bullets that answer the posting,
    demote or cut the ones that do not. Prefer cutting a whole bullet to
    shortening every bullet into mush. The `<span class="r">` lead-in label may
