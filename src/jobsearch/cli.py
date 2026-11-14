@@ -140,6 +140,18 @@ def cmd_discover(cfg: Config, args: argparse.Namespace) -> int:
 
         for row in note_in_flight_delistings(tracker):
             print(f"  ! delisted after you applied: {row.company} - {row.title} ({row.status}); note added")
+
+        from .stale import restore_relisted, withdraw_delisted
+
+        if not args.dry_run:
+            for row in restore_relisted(tracker):
+                print(f"  listed again, reopened as {row.status}: {row.company} - {row.title}")
+        gone = withdraw_delisted(tracker, dry_run=args.dry_run)
+        if gone and args.dry_run:
+            print(f"[dry-run] would withdraw {len(gone)} untouched role(s) no longer listed")
+        elif gone:
+            print(f"{len(gone)} untouched role(s) no longer listed, withdrawn "
+                  "(reason 'auto: no longer listed'; reopened if they reappear)")
     finally:
         tracker.close()
     return 0
@@ -511,11 +523,25 @@ def cmd_stale(cfg: Config, args: argparse.Namespace) -> int:
             print(f"IN FLIGHT, NO LONGER LISTED ({len(gone)}): probably filled or paused; status left as is")
             for row in sorted(gone, key=lambda r: (r.company, r.title)):
                 print(f"  [{row.days_unseen:>3}d unseen] {row.status:<15} {row.company} - {row.title[:52]}")
-        if report.delisted:
+        if args.withdraw:
+            from .stale import withdraw_delisted
+
+            closed = withdraw_delisted(
+                tracker, grace_hours=args.grace_hours, min_days=args.min_days,
+                dry_run=args.dry_run,
+            )
+            print()
+            verb = "Would withdraw" if args.dry_run else "Withdrew"
+            print(f"{verb} {len(closed)} role(s) unseen for {args.min_days}+ days with no next action:")
+            for row in sorted(closed, key=lambda r: (r.company, r.title)):
+                age = f"{row.days_unseen}d" if row.days_unseen is not None else "?"
+                print(f"  [{age:>4} unseen] {row.status:<12} {row.company} - {row.title[:52]}")
+        elif report.delisted:
             print()
             print(
-                "Nothing has been changed. To close one: "
-                "jobsearch track <job-id> --status Withdrawn --reason 'no longer listed'"
+                "Nothing has been changed. Close them with `jobsearch stale --withdraw` "
+                "(preview with `jobsearch --dry-run stale --withdraw`); discover also "
+                "does this after every sweep."
             )
     finally:
         tracker.close()
@@ -1177,8 +1203,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Roles a board has stopped returning",
         description=(
             "Lists tracked roles that a board was swept for and did not return, so "
-            "they are very likely delisted. Reports only; nothing is changed. Roles "
-            "on boards not swept since last_seen_at was introduced are listed "
+            "they are very likely delisted. Reports only unless --withdraw is given. "
+            "Roles on boards not swept since last_seen_at was introduced are listed "
             "separately as unproven rather than assumed dead."
         ),
     )
@@ -1186,6 +1212,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--grace-hours", type=int, default=36,
         help="How far behind its company's latest sighting a row may fall before "
              "it counts as delisted (default 36)",
+    )
+    p.add_argument(
+        "--withdraw", action="store_true",
+        help="Withdraw delisted Not started and Parked roles that have no next action",
+    )
+    p.add_argument(
+        "--min-days", type=int, default=7,
+        help="With --withdraw, only roles unseen for at least this many days (default 7)",
     )
     p.set_defaults(func=cmd_stale)
 
