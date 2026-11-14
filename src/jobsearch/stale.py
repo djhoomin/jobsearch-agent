@@ -12,8 +12,11 @@ and the one the old schema could not express, is between **gone** and **not
 checked**: a row with no recent ``last_seen_at`` on a board that has not been
 swept says nothing at all.
 
-This module only reports. Changing status automatically is a separate decision:
-a bug there silently withdraws live roles and leaves no trace that it happened.
+Reporting is the default. ``withdraw_delisted`` closes the clear cases, and is
+built so a mistake is visible and undone on its own: it touches only roles never
+acted on, waits a week of absence, skips any role with a next action, logs a
+fixed reason in the status history, and ``restore_relisted`` puts a role back
+the moment a board lists it again.
 """
 
 from __future__ import annotations
@@ -201,3 +204,85 @@ def note_in_flight_delistings(tracker: Any, *, grace_hours: int = 36) -> list[St
         )
         noted.append(row)
     return noted
+
+
+#: Reason recorded in status_history on an automatic withdrawal. restore_relisted
+#: matches on it, so a role DJ withdrew by hand is never reopened.
+AUTO_WITHDRAW_REASON = "auto: no longer listed"
+
+#: Days a role must have been absent before it is withdrawn. One flaky sweep, or
+#: a posting re-listed under a new URL (ElevenLabs, 2026-11-10), is shorter.
+AUTO_WITHDRAW_MIN_DAYS = 7
+
+
+def withdraw_delisted(
+    tracker: Any,
+    *,
+    grace_hours: int = 36,
+    min_days: int = AUTO_WITHDRAW_MIN_DAYS,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> list[StaleRow]:
+    """Withdraw untouched roles that their board stopped listing at least ``min_days`` ago.
+
+    Only "Not started" and "Parked" rows qualify, and not one with a next action
+    set: a plan for a role means DJ is acting on it, listed or not. Rows from
+    before ``last_seen_at`` existed qualify once a sweep has covered their
+    company, since by then they have been missing for every sweep since.
+    """
+    from .models import Status
+
+    rows = tracker.list_jobs(limit=100000)
+    by_id = {str(r["job_id"]): r for r in rows}
+    report = find_stale(rows, now=now, grace_hours=grace_hours)
+    withdrawn: list[StaleRow] = []
+    for entry in report.delisted:
+        if str(_field(by_id[entry.job_id], "next_action") or "").strip():
+            continue
+        if entry.days_unseen is not None and entry.days_unseen < min_days:
+            continue
+        withdrawn.append(entry)
+        if dry_run:
+            continue
+        last = str(entry.last_seen_at or "")[:10] or "never since tracking began"
+        tracker.set_status(
+            entry.job_id, Status.WITHDRAWN, reason=f"{AUTO_WITHDRAW_REASON} (last seen {last})"
+        )
+    return withdrawn
+
+
+def restore_relisted(tracker: Any) -> list[StaleRow]:
+    """Undo an automatic withdrawal when a board lists the role again.
+
+    The role returns to the status it was withdrawn from, with a note. Roles
+    withdrawn by hand are left alone, because their last reason differs.
+    """
+    from .models import Status
+
+    restored: list[StaleRow] = []
+    for row in tracker.list_jobs(status=Status.WITHDRAWN, limit=100000):
+        history = tracker.history(row["job_id"])
+        if not history:
+            continue
+        last = history[-1]
+        if not str(last["reason"] or "").startswith(AUTO_WITHDRAW_REASON):
+            continue
+        seen = _parse(row["last_seen_at"])
+        withdrawn_at = _parse(last["changed_at"])
+        if seen is None or withdrawn_at is None or seen <= withdrawn_at:
+            continue
+        previous = Status.parse(last["from_status"])
+        tracker.set_status(row["job_id"], previous, reason="auto: listed again")
+        tracker.add_note(
+            row["job_id"],
+            f"Listed again {str(row['last_seen_at'])[:10]}; reopened as {previous.value}.",
+        )
+        restored.append(StaleRow(
+            job_id=str(row["job_id"]),
+            company=str(row["company"] or ""),
+            title=str(row["title"] or ""),
+            status=previous.value,
+            last_seen_at=row["last_seen_at"],
+            days_unseen=0,
+        ))
+    return restored

@@ -120,3 +120,81 @@ class TestInFlightDelistings:
             self._row("parked", "A", "Parked", "2026-09-01T10:00:00+00:00"),
         ]
         assert [r.job_id for r in in_flight_delisted(rows)] == ["gone"]
+
+
+class TestAutoWithdraw:
+    """Withdrawing must stay narrow, leave a trace, and undo itself."""
+
+    @staticmethod
+    def _tracker(tmp_path, rows):
+        from jobsearch.models import JobPosting, Status
+        from jobsearch.tracker import Tracker
+
+        t = Tracker(path=tmp_path / "t.db")
+        for job_id, status, seen, next_action in rows:
+            t.upsert_job(JobPosting(
+                company="Acme", title=job_id, url=f"https://jobs.ashbyhq.com/acme/{job_id}",
+                source="ashby", job_id=job_id,
+            ))
+            if status != "Not started":
+                t.set_status(job_id, Status.PARKED if status == "Parked" else Status.APPLIED)
+            t._conn.execute(
+                "UPDATE job SET last_seen_at=?, next_action=? WHERE job_id=?",
+                (seen.isoformat() if seen else None, next_action, job_id),
+            )
+        t._conn.commit()
+        return t
+
+    def test_withdraws_only_old_untouched_roles_and_logs_why(self, tmp_path):
+        from jobsearch.stale import AUTO_WITHDRAW_REASON, withdraw_delisted
+
+        now = datetime.now(timezone.utc)
+        t = self._tracker(tmp_path, [
+            ("live", "Not started", now, None),
+            ("gone", "Not started", now - timedelta(days=20), None),
+            ("parked", "Parked", now - timedelta(days=20), None),
+            ("recent", "Not started", now - timedelta(days=3), None),
+            ("planned", "Not started", now - timedelta(days=20), "Ask Dolf"),
+            ("applied", "Applied", now - timedelta(days=20), None),
+        ])
+        closed = {r.job_id for r in withdraw_delisted(t, now=now)}
+        assert closed == {"gone", "parked"}
+        assert t.get_job("gone")["status"] == "Withdrawn"
+        assert t.history("gone")[-1]["reason"].startswith(AUTO_WITHDRAW_REASON)
+        for kept in ("live", "recent", "planned", "applied"):
+            assert t.get_job(kept)["status"] != "Withdrawn"
+        t.close()
+
+    def test_dry_run_changes_nothing(self, tmp_path):
+        from jobsearch.stale import withdraw_delisted
+
+        now = datetime.now(timezone.utc)
+        t = self._tracker(tmp_path, [
+            ("live", "Not started", now, None),
+            ("gone", "Not started", now - timedelta(days=20), None),
+        ])
+        assert [r.job_id for r in withdraw_delisted(t, now=now, dry_run=True)] == ["gone"]
+        assert t.get_job("gone")["status"] == "Not started"
+        t.close()
+
+    def test_a_role_listed_again_is_reopened_but_a_manual_withdrawal_is_not(self, tmp_path):
+        from jobsearch.models import Status
+        from jobsearch.stale import restore_relisted, withdraw_delisted
+
+        now = datetime.now(timezone.utc)
+        t = self._tracker(tmp_path, [
+            ("live", "Not started", now, None),
+            ("gone", "Parked", now - timedelta(days=20), None),
+            ("mine", "Not started", now - timedelta(days=20), None),
+        ])
+        t.set_status("mine", Status.WITHDRAWN, reason="not for me")
+        withdraw_delisted(t, now=now)
+        t._conn.execute(
+            "UPDATE job SET last_seen_at=? WHERE job_id IN ('gone','mine')",
+            ((now + timedelta(hours=1)).isoformat(),),
+        )
+        t._conn.commit()
+        assert [r.job_id for r in restore_relisted(t)] == ["gone"]
+        assert t.get_job("gone")["status"] == "Parked"
+        assert t.get_job("mine")["status"] == "Withdrawn"
+        t.close()
